@@ -1,6 +1,7 @@
+from __future__ import annotations
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-
 from app.api.deps import get_db
 from app.db.models.conversation_message import ConversationMessage
 from app.db.models.daily_checkin import DailyCheckIn
@@ -11,7 +12,6 @@ from app.schemas.risk_analysis import (
     RiskAnalysisRead,
     RiskAnalysisUpdate,
 )
-
 router = APIRouter(prefix="/risk-analysis", tags=["risk-analysis"])
 
 

@@ -1,9 +1,16 @@
 import type {
   ConversationMessage,
   CreateUserRequest,
-  CreateUserResponse,
   SendMessageRequest,
 } from "./types";
+
+export type User = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  language: string;
+  phone_number: string;
+};
 
 const API_BASE = "http://127.0.0.1:8000/api/v1";
 
@@ -16,9 +23,14 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function getUsers(): Promise<User[]> {
+  const response = await fetch(`${API_BASE}/users/`);
+  return handleResponse<User[]>(response);
+}
+
 export async function createUser(
   payload: CreateUserRequest,
-): Promise<CreateUserResponse> {
+): Promise<User> {
   const response = await fetch(`${API_BASE}/users/`, {
     method: "POST",
     headers: {
@@ -27,7 +39,7 @@ export async function createUser(
     body: JSON.stringify(payload),
   });
 
-  return handleResponse<CreateUserResponse>(response);
+  return handleResponse<User>(response);
 }
 
 export async function getMessages(
@@ -80,4 +92,32 @@ export async function sendMessageStream(
   } finally {
     reader.releaseLock();
   }
+}
+export type RiskAnalysis = {
+  id: number;
+  user_id: number;
+  conversation_message_id: number | null;
+  category: string;
+  risk_level: string;
+  needs_family_notification: boolean;
+  reason: string;
+  suggested_action: string;
+  model_version: string;
+  created_at?: string | null;
+};
+
+export async function getUserRiskAnalysis(userId: number): Promise<RiskAnalysis[]> {
+  const response = await fetch(`${API_BASE}/conversations/${userId}/risk-analysis`);
+  return handleResponse<RiskAnalysis[]>(response);
+}
+export async function deleteMessages(userId: number) {
+  const res = await fetch(`${API_BASE}/conversations/${userId}/messages`, {
+    method: "DELETE",
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to delete messages");
+  }
+
+  return res.json();
 }

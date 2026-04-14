@@ -1,50 +1,63 @@
-
+# =========================
 # OS / Editor
-
+# =========================
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# Frontend
-
+# =========================
+# Frontend (React / Vite)
+# =========================
 frontend/node_modules/
 frontend/dist/
 frontend/build/
+
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
-
-# Backend
-
+# =========================
+# Backend (FastAPI)
+# =========================
 welfare-bot-backend/.venv/
 welfare-bot-backend/venv/
 welfare-bot-backend/__pycache__/
+
 welfare-bot-backend/.env
 welfare-bot-backend/.env.*
 !welfare-bot-backend/.env.example
 
-# Python cache
+# =========================
+# Python
+# =========================
 **/__pycache__/
 **/*.py[cod]
 **/*.pyo
 
-# Pytest / mypy / tooling
+# =========================
+# Tooling / cache
+# =========================
 **/.pytest_cache/
 **/.mypy_cache/
 **/.ruff_cache/
 
+# =========================
 # Logs
+# =========================
 *.log
 
-# Local database / dumps
+# =========================
+# Databases / dumps
+# =========================
 *.sqlite3
 *.db
 *.sql
 *.dump
 
+# =========================
 # Build artifacts
+# =========================
 dist/
 build/
 coverage/

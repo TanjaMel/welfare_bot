@@ -1,23 +1,23 @@
+from __future__ import annotations
 from datetime import datetime
 from typing import Iterator
-
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+
 
 from app.api.deps import get_db
 from app.core.config import get_settings
-from app.db.models.care_contact import CareContact
 from app.db.models.conversation_message import ConversationMessage as ConversationMessageDB
 from app.db.models.notification import Notification
-from app.db.models.risk_analysis import RiskAnalysis
+from app.db.models.risk_event import RiskEvent
 from app.db.models.user import User
-from app.services.risk_analysis_service import (
-    analyze_chat_message,
-    build_notification_message,
+from app.services.response_guard_service import (
+    fallback_message_for_language,
+    is_mixed_language,
 )
+from app.services.risk_service import SUPPORTED_LANGUAGES, assess, detect_language
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -30,17 +30,21 @@ class ConversationMessageRead(BaseModel):
     role: str
     content: str
     created_at: str | None = None
+    risk_level: str | None = None
+    risk_score: int | None = None
+    risk_category: str | None = None
 
 
 class SendMessageRequest(BaseModel):
     user_id: int
     message: str
+    language: str | None = None
 
 
 class SendMessageResponse(BaseModel):
     reply: str
     risk_analysis: dict | None = None
-    notifications: list[dict] = []
+    notifications: list[dict] = Field(default_factory=list)
 
 
 def to_message_read(message: ConversationMessageDB) -> ConversationMessageRead:
@@ -49,10 +53,65 @@ def to_message_read(message: ConversationMessageDB) -> ConversationMessageRead:
         role=message.role,
         content=message.content,
         created_at=message.created_at.isoformat() if message.created_at else None,
+        risk_level=message.risk_level,
+        risk_score=message.risk_score,
+        risk_category=message.risk_category,
     )
 
 
-def build_input_items(db: Session, user_id: int) -> list[dict]:
+def resolve_language(user: User, payload_language: str | None, text: str) -> str:
+    if payload_language and payload_language in SUPPORTED_LANGUAGES:
+        return payload_language
+
+    user_language = getattr(user, "language", None)
+    if user_language and user_language in SUPPORTED_LANGUAGES:
+        return user_language
+
+    return detect_language(text)
+
+
+def get_recent_user_messages(
+    db: Session,
+    user_id: int,
+    current_message_id: int | None = None,
+) -> list[str]:
+    query = (
+        db.query(ConversationMessageDB)
+        .filter(
+            ConversationMessageDB.user_id == user_id,
+            ConversationMessageDB.role == "user",
+        )
+        .order_by(ConversationMessageDB.id.desc())
+        .limit(5)
+    )
+
+    messages = query.all()
+    texts: list[str] = []
+
+    for msg in messages:
+        if current_message_id is not None and msg.id == current_message_id:
+            continue
+        texts.append(msg.content)
+
+    return list(reversed(texts))
+
+
+def language_label(language_code: str) -> str:
+    normalized = (language_code or "en").lower()
+
+    if normalized.startswith("fi"):
+        return "Finnish"
+    if normalized.startswith("sv"):
+        return "Swedish"
+    return "English"
+
+
+def build_input_items(
+    db: Session,
+    user_id: int,
+    language: str,
+    risk_assessment: dict,
+) -> list[dict]:
     messages = (
         db.query(ConversationMessageDB)
         .filter(ConversationMessageDB.user_id == user_id)
@@ -60,14 +119,69 @@ def build_input_items(db: Session, user_id: int) -> list[dict]:
         .all()
     )
 
+    target_language = language_label(language)
+
+    developer_prompt = f"""
+You are a supportive welfare assistant for older adults.
+
+LANGUAGE RULES:
+- You MUST reply ONLY in {target_language}.
+- Never mix languages in the same reply.
+- Never add translations.
+- Never switch language mid-response.
+- If the user's message is in another language, still reply only in {target_language}.
+
+ROLE:
+- You are supportive, calm, practical, and human.
+- Keep replies clear, warm, and not overly long.
+- Do not sound robotic.
+- Do not diagnose medical conditions.
+
+RISK CONTEXT (already decided by backend):
+- risk_level: {risk_assessment["risk_level"]}
+- risk_category: {risk_assessment["category"]}
+- detected_signals: {", ".join(risk_assessment["signals"]) if risk_assessment["signals"] else "none"}
+- follow_up_question: {risk_assessment["follow_up_question"]}
+- suggested_action: {risk_assessment["suggested_action"]}
+- should_alert_family: {risk_assessment["should_alert_family"]}
+
+SAFETY RULES:
+- You must NOT decide or change the risk level.
+- You only generate the response text.
+- LOW:
+  - give a gentle supportive response
+  - follow-up question is optional
+- MEDIUM:
+  - mention that the symptoms may affect wellbeing
+  - ask exactly one follow-up question
+- HIGH:
+  - express stronger concern
+  - encourage immediate support / check-in
+  - ask exactly one safety-oriented follow-up question
+- CRITICAL:
+  - clearly recommend urgent help immediately
+  - be calm but direct
+  - tell the user to contact emergency help / urgent care / trusted person now
+
+STYLE:
+- calm
+- human
+- non-alarmist unless risk_level is CRITICAL
+- practical
+- short paragraphs
+- no bullet points in the reply
+
+OUTPUT RULES:
+- Return plain text only.
+- No headings.
+- No translations.
+- No language mixing.
+"""
+
     items: list[dict] = [
         {
             "role": "developer",
-            "content": (
-                "You are a supportive welfare assistant for older people. "
-                "Reply clearly, warmly, and briefly. "
-                "Use simple language and a calm tone."
-            ),
+            "content": developer_prompt.strip(),
         }
     ]
 
@@ -83,64 +197,36 @@ def build_input_items(db: Session, user_id: int) -> list[dict]:
     return items
 
 
-def save_auto_risk_and_notifications(
+def maybe_create_risk_event(
     db: Session,
-    user: User,
-    message: ConversationMessageDB,
-) -> tuple[RiskAnalysis, list[Notification]]:
-    analysis_data = analyze_chat_message(message.content)
-
-    risk_analysis = RiskAnalysis(
-        user_id=user.id,
-        conversation_message_id=message.id,
-        daily_checkin_id=None,
-        category=analysis_data["category"],
-        risk_level=analysis_data["risk_level"],
-        needs_family_notification=analysis_data["needs_family_notification"],
-        reason=analysis_data["reason"],
-        suggested_action=analysis_data["suggested_action"],
-        model_version=analysis_data["model_version"],
+    user_id: int,
+    message_id: int,
+    risk_assessment: dict,
+) -> RiskEvent | None:
+    should_create = (
+        risk_assessment["risk_level"] in {"medium", "high", "critical"}
+        or risk_assessment["should_alert_family"]
     )
-    db.add(risk_analysis)
+
+    if not should_create:
+        return None
+
+    event = RiskEvent(
+        conversation_id=user_id,  # current single-thread-per-user app model
+        message_id=message_id,
+        user_id=user_id,
+        risk_level=risk_assessment["risk_level"],
+        risk_score=risk_assessment["score"],
+        risk_category=risk_assessment["category"],
+        signals_json=risk_assessment["signals"],
+        reasons_json=risk_assessment["reasons"],
+        suggested_action=risk_assessment["suggested_action"],
+        should_alert_family=risk_assessment["should_alert_family"],
+    )
+    db.add(event)
     db.commit()
-    db.refresh(risk_analysis)
-
-    created_notifications: list[Notification] = []
-
-    if risk_analysis.needs_family_notification:
-        contacts = (
-            db.query(CareContact)
-            .filter(CareContact.user_id == user.id, CareContact.is_primary.is_(True))
-            .all()
-        )
-
-        if not contacts:
-            contacts = db.query(CareContact).filter(CareContact.user_id == user.id).all()
-
-        for contact in contacts:
-            notification = Notification(
-                user_id=user.id,
-                care_contact_id=contact.id,
-                risk_analysis_id=risk_analysis.id,
-                channel=contact.preferred_notification_method,
-                message=build_notification_message(
-                    first_name=user.first_name,
-                    last_name=user.last_name,
-                    category=risk_analysis.category,
-                    risk_level=risk_analysis.risk_level,
-                    reason=risk_analysis.reason,
-                ),
-                status="pending",
-            )
-            db.add(notification)
-            created_notifications.append(notification)
-
-        db.commit()
-
-        for notification in created_notifications:
-            db.refresh(notification)
-
-    return risk_analysis, created_notifications
+    db.refresh(event)
+    return event
 
 
 @router.get("/{user_id}/messages", response_model=list[ConversationMessageRead])
@@ -165,27 +251,27 @@ def get_user_risk_analysis(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    analyses = (
-        db.query(RiskAnalysis)
-        .filter(RiskAnalysis.user_id == user_id, RiskAnalysis.conversation_message_id.is_not(None))
-        .order_by(RiskAnalysis.id.desc())
+    events = (
+        db.query(RiskEvent)
+        .filter(RiskEvent.user_id == user_id)
+        .order_by(RiskEvent.id.desc())
         .all()
     )
 
     return [
         {
-            "id": a.id,
-            "user_id": a.user_id,
-            "conversation_message_id": a.conversation_message_id,
-            "category": a.category,
-            "risk_level": a.risk_level,
-            "needs_family_notification": a.needs_family_notification,
-            "reason": a.reason,
-            "suggested_action": a.suggested_action,
-            "model_version": a.model_version,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "id": e.id,
+            "user_id": e.user_id,
+            "conversation_message_id": e.message_id,
+            "category": e.risk_category,
+            "risk_level": e.risk_level,
+            "needs_family_notification": e.should_alert_family,
+            "reason": " | ".join(e.reasons_json) if e.reasons_json else "",
+            "suggested_action": e.suggested_action,
+            "model_version": "risk_engine_v1",
+            "created_at": e.created_at.isoformat() if e.created_at else None,
         }
-        for a in analyses
+        for e in events
     ]
 
 
@@ -231,6 +317,9 @@ def send_message(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    language = resolve_language(user, payload.language, user_text)
+
+    # 1. Save user message
     user_message = ConversationMessageDB(
         user_id=payload.user_id,
         role="user",
@@ -241,21 +330,64 @@ def send_message(
     db.commit()
     db.refresh(user_message)
 
-    risk_analysis, notifications = save_auto_risk_and_notifications(
+    # 2. Load recent user messages
+    recent_user_messages = get_recent_user_messages(
         db=db,
-        user=user,
-        message=user_message,
+        user_id=payload.user_id,
+        current_message_id=user_message.id,
     )
 
+    # 3. Run risk engine
+    risk_assessment = assess(
+        current_message=user_text,
+        recent_user_messages=recent_user_messages,
+        preferred_language=language,
+        elderly=True,
+    )
+
+    # 4. Save risk metadata into conversation_messages
+    user_message.risk_level = risk_assessment["risk_level"]
+    user_message.risk_score = risk_assessment["score"]
+    user_message.risk_category = risk_assessment["category"]
+    db.add(user_message)
+    db.commit()
+    db.refresh(user_message)
+
+    # 5. Create risk_event if needed
+    maybe_create_risk_event(
+        db=db,
+        user_id=payload.user_id,
+        message_id=user_message.id,
+        risk_assessment=risk_assessment,
+    )
+
+    # 6. Pass risk context into OpenAI prompt
     try:
         response = client.responses.create(
             model=settings.openai_model,
-            input=build_input_items(db, payload.user_id),
+            input=build_input_items(
+                db=db,
+                user_id=payload.user_id,
+                language=language,
+                risk_assessment=risk_assessment,
+            ),
         )
-        assistant_text = response.output_text or "Sorry, I could not generate a reply."
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI error: {str(e)}")
 
+        assistant_text = (response.output_text or "").strip()
+        if not assistant_text:
+            assistant_text = "Sorry, I could not generate a reply."
+
+        if is_mixed_language(assistant_text, language):
+            assistant_text = fallback_message_for_language(
+                language=language,
+                risk_level=risk_assessment["risk_level"],
+                follow_up_question=risk_assessment["follow_up_question"],
+            )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OpenAI error: {str(e)}") from e
+
+    # 7-8. Save bot message
     assistant_message = ConversationMessageDB(
         user_id=payload.user_id,
         role="assistant",
@@ -268,30 +400,8 @@ def send_message(
 
     return SendMessageResponse(
         reply=assistant_text,
-        risk_analysis={
-            "id": risk_analysis.id,
-            "user_id": risk_analysis.user_id,
-            "conversation_message_id": risk_analysis.conversation_message_id,
-            "category": risk_analysis.category,
-            "risk_level": risk_analysis.risk_level,
-            "needs_family_notification": risk_analysis.needs_family_notification,
-            "reason": risk_analysis.reason,
-            "suggested_action": risk_analysis.suggested_action,
-            "model_version": risk_analysis.model_version,
-            "created_at": risk_analysis.created_at.isoformat() if risk_analysis.created_at else None,
-        },
-        notifications=[
-            {
-                "id": n.id,
-                "care_contact_id": n.care_contact_id,
-                "risk_analysis_id": n.risk_analysis_id,
-                "channel": n.channel,
-                "message": n.message,
-                "status": n.status,
-                "created_at": n.created_at.isoformat() if n.created_at else None,
-            }
-            for n in notifications
-        ],
+        risk_analysis=risk_assessment,
+        notifications=[],
     )
 
 
@@ -308,6 +418,9 @@ def send_message_stream(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    language = resolve_language(user, payload.language, user_text)
+
+    # 1. Save user message
     user_message = ConversationMessageDB(
         user_id=payload.user_id,
         role="user",
@@ -318,13 +431,44 @@ def send_message_stream(
     db.commit()
     db.refresh(user_message)
 
-    save_auto_risk_and_notifications(
+    # 2. Load recent user messages
+    recent_user_messages = get_recent_user_messages(
         db=db,
-        user=user,
-        message=user_message,
+        user_id=payload.user_id,
+        current_message_id=user_message.id,
     )
 
-    input_items = build_input_items(db, payload.user_id)
+    # 3. Run risk engine
+    risk_assessment = assess(
+        current_message=user_text,
+        recent_user_messages=recent_user_messages,
+        preferred_language=language,
+        elderly=True,
+    )
+
+    # 4. Save risk metadata into conversation_messages
+    user_message.risk_level = risk_assessment["risk_level"]
+    user_message.risk_score = risk_assessment["score"]
+    user_message.risk_category = risk_assessment["category"]
+    db.add(user_message)
+    db.commit()
+    db.refresh(user_message)
+
+    # 5. Create risk_event if needed
+    maybe_create_risk_event(
+        db=db,
+        user_id=payload.user_id,
+        message_id=user_message.id,
+        risk_assessment=risk_assessment,
+    )
+
+    # 6. Build risk-aware prompt
+    input_items = build_input_items(
+        db=db,
+        user_id=payload.user_id,
+        language=language,
+        risk_assessment=risk_assessment,
+    )
 
     def generate() -> Iterator[str]:
         collected: list[str] = []
@@ -353,6 +497,13 @@ def send_message_stream(
             if not assistant_text:
                 assistant_text = "Sorry, I could not generate a reply."
 
+            if is_mixed_language(assistant_text, language):
+                assistant_text = fallback_message_for_language(
+                    language=language,
+                    risk_level=risk_assessment["risk_level"],
+                    follow_up_question=risk_assessment["follow_up_question"],
+                )
+
             assistant_message = ConversationMessageDB(
                 user_id=payload.user_id,
                 role="assistant",
@@ -373,3 +524,24 @@ def send_message_stream(
             "X-Accel-Buffering": "no",
         },
     )
+@router.delete("/{user_id}/messages")
+def delete_user_messages(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.query(ConversationMessageDB).filter(
+        ConversationMessageDB.user_id == user_id
+    ).delete()
+
+    db.query(RiskEvent).filter(
+        RiskEvent.user_id == user_id
+    ).delete()
+
+    db.query(Notification).filter(
+        Notification.user_id == user_id
+    ).delete()
+
+    db.commit()
+
+    return {"status": "deleted"}
