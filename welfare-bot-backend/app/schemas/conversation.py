@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-
+from __future__ import annotations
 
 class ConversationMessageCreate(BaseModel):
     user_id: int

@@ -1,8 +1,6 @@
 from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-
 from app.api.deps import get_db
 from app.db.models.care_contact import CareContact
 from app.db.models.notification import Notification

@@ -1,23 +1,24 @@
 from __future__ import annotations
-from datetime import datetime
 from typing import Iterator
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel, Field
-
-
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.core.config import get_settings
 from app.db.models.conversation_message import ConversationMessage as ConversationMessageDB
 from app.db.models.notification import Notification
 from app.db.models.risk_event import RiskEvent
 from app.db.models.user import User
+from app.services.memory_service import refresh_user_memory_summary
 from app.services.response_guard_service import (
     fallback_message_for_language,
     is_mixed_language,
 )
 from app.services.risk_service import SUPPORTED_LANGUAGES, assess, detect_language
+from app.services.token_service import trim_input_items_to_token_budget
+from app.services.validation_service import validate_user_message
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -44,7 +45,8 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     reply: str
     risk_analysis: dict | None = None
-    notifications: list[dict] = Field(default_factory=list)
+    notifications: list[dict] = []
+    mode: str = "non_stream"
 
 
 def to_message_read(message: ConversationMessageDB) -> ConversationMessageRead:
@@ -70,32 +72,6 @@ def resolve_language(user: User, payload_language: str | None, text: str) -> str
     return detect_language(text)
 
 
-def get_recent_user_messages(
-    db: Session,
-    user_id: int,
-    current_message_id: int | None = None,
-) -> list[str]:
-    query = (
-        db.query(ConversationMessageDB)
-        .filter(
-            ConversationMessageDB.user_id == user_id,
-            ConversationMessageDB.role == "user",
-        )
-        .order_by(ConversationMessageDB.id.desc())
-        .limit(5)
-    )
-
-    messages = query.all()
-    texts: list[str] = []
-
-    for msg in messages:
-        if current_message_id is not None and msg.id == current_message_id:
-            continue
-        texts.append(msg.content)
-
-    return list(reversed(texts))
-
-
 def language_label(language_code: str) -> str:
     normalized = (language_code or "en").lower()
 
@@ -106,15 +82,44 @@ def language_label(language_code: str) -> str:
     return "English"
 
 
-def build_input_items(
+def get_max_input_tokens() -> int:
+    return 6000
+
+
+def get_recent_user_messages(
     db: Session,
     user_id: int,
+    current_message_id: int | None = None,
+) -> list[str]:
+    messages = (
+        db.query(ConversationMessageDB)
+        .filter(
+            ConversationMessageDB.user_id == user_id,
+            ConversationMessageDB.role == "user",
+        )
+        .order_by(ConversationMessageDB.id.desc())
+        .limit(5)
+        .all()
+    )
+
+    texts: list[str] = []
+    for msg in messages:
+        if current_message_id is not None and msg.id == current_message_id:
+            continue
+        texts.append(msg.content)
+
+    return list(reversed(texts))
+
+
+def build_input_items(
+    db: Session,
+    user: User,
     language: str,
     risk_assessment: dict,
 ) -> list[dict]:
     messages = (
         db.query(ConversationMessageDB)
-        .filter(ConversationMessageDB.user_id == user_id)
+        .filter(ConversationMessageDB.user_id == user.id)
         .order_by(ConversationMessageDB.id.asc())
         .all()
     )
@@ -176,14 +181,22 @@ OUTPUT RULES:
 - No headings.
 - No translations.
 - No language mixing.
-"""
+""".strip()
 
     items: list[dict] = [
         {
             "role": "developer",
-            "content": developer_prompt.strip(),
+            "content": developer_prompt,
         }
     ]
+
+    if user.memory_summary:
+        items.append(
+            {
+                "role": "developer",
+                "content": f"Long-term memory summary:\n{user.memory_summary}",
+            }
+        )
 
     for msg in messages:
         if msg.role in ("user", "assistant"):
@@ -194,7 +207,11 @@ OUTPUT RULES:
                 }
             )
 
-    return items
+    return trim_input_items_to_token_budget(
+        items=items,
+        model_name=settings.openai_model,
+        max_input_tokens=get_max_input_tokens(),
+    )
 
 
 def maybe_create_risk_event(
@@ -212,7 +229,7 @@ def maybe_create_risk_event(
         return None
 
     event = RiskEvent(
-        conversation_id=user_id,  # current single-thread-per-user app model
+        conversation_id=user_id,
         message_id=message_id,
         user_id=user_id,
         risk_level=risk_assessment["risk_level"],
@@ -227,6 +244,38 @@ def maybe_create_risk_event(
     db.commit()
     db.refresh(event)
     return event
+
+
+def should_stream_reply(risk_level: str) -> bool:
+    return risk_level in {"low", "medium"}
+
+
+def generate_non_stream_reply(
+    db: Session,
+    user: User,
+    language: str,
+    risk_assessment: dict,
+) -> str:
+    response = client.responses.create(
+        model=settings.openai_model,
+        input=build_input_items(
+            db=db,
+            user=user,
+            language=language,
+            risk_assessment=risk_assessment,
+        ),
+    )
+
+    assistant_text = response.output_text or "Sorry, I could not generate a reply."
+
+    if is_mixed_language(assistant_text, language):
+        assistant_text = fallback_message_for_language(
+            language=language,
+            risk_level=risk_assessment["risk_level"],
+            follow_up_question=risk_assessment["follow_up_question"],
+        )
+
+    return assistant_text
 
 
 @router.get("/{user_id}/messages", response_model=list[ConversationMessageRead])
@@ -309,17 +358,29 @@ def send_message(
     payload: SendMessageRequest,
     db: Session = Depends(get_db),
 ) -> SendMessageResponse:
-    user_text = payload.message.strip()
-    if not user_text:
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    raw_text = payload.message
 
     user = db.query(User).filter(User.id == payload.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    recent_user_messages = get_recent_user_messages(
+        db=db,
+        user_id=payload.user_id,
+        current_message_id=None,
+    )
+
+    validation = validate_user_message(
+        text=raw_text,
+        recent_user_messages=recent_user_messages,
+    )
+
+    if not validation.is_valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+
+    user_text = validation.cleaned_text
     language = resolve_language(user, payload.language, user_text)
 
-    # 1. Save user message
     user_message = ConversationMessageDB(
         user_id=payload.user_id,
         role="user",
@@ -330,14 +391,12 @@ def send_message(
     db.commit()
     db.refresh(user_message)
 
-    # 2. Load recent user messages
     recent_user_messages = get_recent_user_messages(
         db=db,
         user_id=payload.user_id,
         current_message_id=user_message.id,
     )
 
-    # 3. Run risk engine
     risk_assessment = assess(
         current_message=user_text,
         recent_user_messages=recent_user_messages,
@@ -345,7 +404,6 @@ def send_message(
         elderly=True,
     )
 
-    # 4. Save risk metadata into conversation_messages
     user_message.risk_level = risk_assessment["risk_level"]
     user_message.risk_score = risk_assessment["score"]
     user_message.risk_category = risk_assessment["category"]
@@ -353,7 +411,6 @@ def send_message(
     db.commit()
     db.refresh(user_message)
 
-    # 5. Create risk_event if needed
     maybe_create_risk_event(
         db=db,
         user_id=payload.user_id,
@@ -361,33 +418,16 @@ def send_message(
         risk_assessment=risk_assessment,
     )
 
-    # 6. Pass risk context into OpenAI prompt
     try:
-        response = client.responses.create(
-            model=settings.openai_model,
-            input=build_input_items(
-                db=db,
-                user_id=payload.user_id,
-                language=language,
-                risk_assessment=risk_assessment,
-            ),
+        assistant_text = generate_non_stream_reply(
+            db=db,
+            user=user,
+            language=language,
+            risk_assessment=risk_assessment,
         )
-
-        assistant_text = (response.output_text or "").strip()
-        if not assistant_text:
-            assistant_text = "Sorry, I could not generate a reply."
-
-        if is_mixed_language(assistant_text, language):
-            assistant_text = fallback_message_for_language(
-                language=language,
-                risk_level=risk_assessment["risk_level"],
-                follow_up_question=risk_assessment["follow_up_question"],
-            )
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI error: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"OpenAI error: {str(e)}")
 
-    # 7-8. Save bot message
     assistant_message = ConversationMessageDB(
         user_id=payload.user_id,
         role="assistant",
@@ -398,10 +438,13 @@ def send_message(
     db.commit()
     db.refresh(assistant_message)
 
+    refresh_user_memory_summary(db=db, user=user)
+
     return SendMessageResponse(
         reply=assistant_text,
         risk_analysis=risk_assessment,
         notifications=[],
+        mode="non_stream",
     )
 
 
@@ -410,17 +453,29 @@ def send_message_stream(
     payload: SendMessageRequest,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    user_text = payload.message.strip()
-    if not user_text:
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    raw_text = payload.message
 
     user = db.query(User).filter(User.id == payload.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    recent_user_messages = get_recent_user_messages(
+        db=db,
+        user_id=payload.user_id,
+        current_message_id=None,
+    )
+
+    validation = validate_user_message(
+        text=raw_text,
+        recent_user_messages=recent_user_messages,
+    )
+
+    if not validation.is_valid:
+        raise HTTPException(status_code=400, detail=validation.error)
+
+    user_text = validation.cleaned_text
     language = resolve_language(user, payload.language, user_text)
 
-    # 1. Save user message
     user_message = ConversationMessageDB(
         user_id=payload.user_id,
         role="user",
@@ -431,14 +486,12 @@ def send_message_stream(
     db.commit()
     db.refresh(user_message)
 
-    # 2. Load recent user messages
     recent_user_messages = get_recent_user_messages(
         db=db,
         user_id=payload.user_id,
         current_message_id=user_message.id,
     )
 
-    # 3. Run risk engine
     risk_assessment = assess(
         current_message=user_text,
         recent_user_messages=recent_user_messages,
@@ -446,7 +499,6 @@ def send_message_stream(
         elderly=True,
     )
 
-    # 4. Save risk metadata into conversation_messages
     user_message.risk_level = risk_assessment["risk_level"]
     user_message.risk_score = risk_assessment["score"]
     user_message.risk_category = risk_assessment["category"]
@@ -454,7 +506,6 @@ def send_message_stream(
     db.commit()
     db.refresh(user_message)
 
-    # 5. Create risk_event if needed
     maybe_create_risk_event(
         db=db,
         user_id=payload.user_id,
@@ -462,10 +513,15 @@ def send_message_stream(
         risk_assessment=risk_assessment,
     )
 
-    # 6. Build risk-aware prompt
+    if not should_stream_reply(risk_assessment["risk_level"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Streaming is disabled for high and critical risk messages. Use /message instead.",
+        )
+
     input_items = build_input_items(
         db=db,
-        user_id=payload.user_id,
+        user=user,
         language=language,
         risk_assessment=risk_assessment,
     )
@@ -488,7 +544,6 @@ def send_message_stream(
                     if delta:
                         collected.append(delta)
                         yield delta
-
                 elif event_type == "error":
                     message = getattr(event, "message", "Streaming error")
                     raise RuntimeError(message)
@@ -512,6 +567,9 @@ def send_message_stream(
             )
             db.add(assistant_message)
             db.commit()
+            db.refresh(assistant_message)
+
+            refresh_user_memory_summary(db=db, user=user)
 
         except Exception as e:
             yield f"\n[OpenAI error: {str(e)}]"
@@ -524,24 +582,3 @@ def send_message_stream(
             "X-Accel-Buffering": "no",
         },
     )
-@router.delete("/{user_id}/messages")
-def delete_user_messages(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    db.query(ConversationMessageDB).filter(
-        ConversationMessageDB.user_id == user_id
-    ).delete()
-
-    db.query(RiskEvent).filter(
-        RiskEvent.user_id == user_id
-    ).delete()
-
-    db.query(Notification).filter(
-        Notification.user_id == user_id
-    ).delete()
-
-    db.commit()
-
-    return {"status": "deleted"}

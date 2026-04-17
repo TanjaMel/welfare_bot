@@ -1,16 +1,19 @@
+from __future__ import annotations
 from pydantic import BaseModel
 
-
-class UserCreate(BaseModel):
+class UserBase(BaseModel):
     first_name: str
     last_name: str
     language: str
     phone_number: str
 
 
-class UserRead(BaseModel):
+class UserCreate(UserBase):
+    pass
+
+
+class UserRead(UserBase):
     id: int
-    first_name: str
-    last_name: str
-    language: str
-    phone_number: str
+
+    class Config:
+        from_attributes = True  # ВАЖНО

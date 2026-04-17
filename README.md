@@ -1,173 +1,234 @@
-# Welfare Bot — Risk-Aware AI Chat with Data-Driven Analysis
-
-A full-stack application that simulates a welfare assistant for elderly users.  
-The system combines conversational AI with a structured risk analysis pipeline to detect potential health and wellbeing issues in real time.
-
----
+# Welfare Bot – AI-powered Wellbeing Assistant
 
 ## Overview
 
-Welfare Bot is designed as a data-aware system where each user interaction is not only processed by an LLM, but also analyzed, scored, and stored for further evaluation.
+Welfare Bot is a backend-driven AI system designed to support elderly wellbeing through conversational interaction, risk detection, and safety-aware response generation.
 
-The project demonstrates how AI can be combined with structured data processing to build safer and more reliable applications.
+The system analyzes user messages, detects potential wellbeing risks (such as loneliness, fatigue, or health-related signals), and produces structured risk assessments alongside safe, context-aware responses.
+
+The project focuses on combining:
+
+* AI (LLM-based responses)
+* rule-based risk analysis
+* data validation
+* multilingual interaction
+* production-style backend architecture
 
 ---
 
 ## Key Features
 
-- Real-time AI chat with streaming responses
-- Multilingual support (English, Finnish, Swedish)
-- Data-driven risk analysis pipeline
-- Risk classification: low / medium / high / critical
-- Signal detection from user messages (sleep, nutrition, emotional state, etc.)
-- Historical context awareness (recent messages influence risk score)
-- Persistent storage of conversations and risk events
-- API-first backend with structured endpoints
+### Risk-aware conversation pipeline
+
+Each message goes through a structured backend flow:
+
+1. Input validation (anti-spam, length, duplicates)
+2. Risk assessment (rule-based engine)
+3. Risk persistence (database)
+4. Context-aware response generation via LLM
+5. Safety validation of output
 
 ---
 
-## Data & Risk Analysis Pipeline
+### Risk Engine (core logic)
 
-The system processes each message through a structured pipeline:
+The system detects signals such as:
 
-1. User message is stored in the database
-2. Signals are extracted using pattern-based detection
-3. Risk score is calculated using weighted rules
-4. Historical context is applied (recent messages)
-5. Risk level and category are determined
-6. Risk event is stored for further analysis
-7. AI response is generated using risk-aware context
+* poor sleep
+* lack of food or water
+* fatigue
+* dizziness
+* loneliness
+* fall or physical pain
 
-### Example
+Outputs:
 
-Input:
-> "I didn’t sleep well and feel lonely"
+* risk level (low, medium, high, critical)
+* risk score
+* category
+* follow-up question
+* suggested action
 
-Detected signals:
-- poor_sleep
-- sadness_loneliness
+Important:
 
-Result:
-- Increased score due to multiple signals
-- Risk level escalated (e.g. medium → high)
-- Context-aware AI response generated
+* Risk is determined in backend, not by AI
+* AI only generates the response text
+
+---
+
+### Memory Summary (context optimization)
+
+The system maintains a compressed long-term summary of the user:
+
+* reduces token usage
+* improves contextual continuity
+* prevents prompt overflow
+
+---
+
+### Token Optimization
+
+A token management layer:
+
+* trims conversation history
+* preserves important context
+* keeps requests within model limits
+
+---
+
+### Multilingual Support
+
+Supported languages:
+
+* English
+* Finnish
+* Swedish
+
+Features:
+
+* automatic language detection
+* consistent single-language responses
+* no language mixing
+
+---
+
+### Validation Layer
+
+All incoming messages are validated before processing:
+
+* maximum length control
+* anti-spam detection
+* repeated message detection
+
+This ensures higher data quality and more stable system behavior.
+
+---
+
+### Safety-first Design
+
+* No medical diagnosis
+* Controlled escalation for critical cases
+* Risk-aware response logic
+* Output validation to prevent unsafe or mixed-language replies
 
 ---
 
 ## Tech Stack
 
-Frontend
-- React + TypeScript (Vite)
-- Streaming UI for real-time responses
+Backend:
 
-Backend
-- FastAPI
-- OpenAI API (LLM integration)
-- Custom risk analysis service
+* FastAPI
+* PostgreSQL
+* SQLAlchemy
+* Alembic
 
-Data Layer
-- PostgreSQL (Docker)
-- SQLAlchemy ORM
-- Alembic (migrations)
+AI:
 
----
+* OpenAI API (LLM)
 
-## Data Model (Simplified)
+Frontend:
 
-- User
-- ConversationMessage
-- RiskEvent
-- Notification
-
-The system separates:
-- raw user input (messages)
-- processed analytical output (risk events)
-
-This enables further extensions such as:
-- analytics dashboards
-- trend detection
-- predictive modeling
+* React + TypeScript (Vite)
 
 ---
 
-## Screenshots
+## Architecture
 
-### Chat Interface
-![Chat overview](docs/images/chat-overview.png)
-
-### Risk-aware Response
-![Risk escalation](docs/images/chat-risk-escalation.png)
-
-### API Documentation
-![API docs](docs/images/api-docs.png)
-
-### Risk Analysis Endpoint
-![Risk analysis](docs/images/api-risk-analysis.png)
+```text
+Frontend (React)
+        ↓
+FastAPI API Layer
+        ↓
+Service Layer
+  - risk_service
+  - validation_service
+  - memory_service
+  - token_service
+        ↓
+PostgreSQL
+```
 
 ---
 
-## API Example
+## How this project demonstrates data and AI competencies
 
-Endpoint:
+### Data processing
 
-GET /api/v1/conversations/{user_id}/risk-analysis
+* structured storage of conversations and risk events
+* relational data modeling
+* linking users, messages, and risk analysis
 
+### Data validation
 
-Response example:
-```json
-{
-  "risk_level": "high",
-  "category": "emotional",
-  "reason": "Detected signals: fatigue, loneliness",
-  "suggested_action": "Encourage immediate check-in",
-  "created_at": "2026-04-13T12:30:00"
-}
+* input cleaning and normalization
+* spam detection
+* duplicate detection
 
+### AI usage
 
-Setup
-1. Clone repository
-git clone https://github.com/TanjaMel/welfare_bot.git
-cd welfare-bot
+* LLM integration for response generation
+* prompt engineering
+* controlled AI behavior (backend-driven logic)
 
-2. Backend
+### Optimization
+
+* token trimming
+* memory summarization
+* context control
+
+### Evaluation
+
+* risk scoring system
+* test dataset and evaluation scripts
+* ability to measure consistency of outputs
+
+### Ethics and safety
+
+* AI does not make autonomous risk decisions
+* system avoids harmful outputs
+* critical cases are escalated safely
+* user wellbeing is prioritized
+
+---
+
+## API Endpoints
+
+Users:
+
+* GET /users
+* POST /users
+
+Conversations:
+
+* GET /conversations/{user_id}/messages
+* POST /conversations/message
+* POST /conversations/message/stream
+
+Risk:
+
+* GET /conversations/{user_id}/risk-analysis
+
+---
+
+## Setup
+
+```bash
 cd welfare-bot-backend
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
 
-3. Database (Docker)
-docker-compose up -d
+---
 
-4. Run backend
-python -m uvicorn app.main:app --reload
+## Recent Updates
 
-API docs:
+* Added token management layer (token_service)
+* Implemented memory summary system for context compression
+* Introduced validation layer (anti-spam, duplicate detection, max length)
+* Improved risk-aware prompt structure
+* Added multilingual response handling
+* Implemented safer response generation (stream vs non-stream based on risk)
 
-http://127.0.0.1:8000/docs
-
-5. Frontend
-cd ../frontend
-npm install
-npm run dev
-
-Frontend:
-
-http://localhost:5173
-
-
-## What This Project Demonstrates
-
-Full-stack development (frontend + backend + database)
-Designing API-driven systems
-Combining AI with deterministic data pipelines
-Building explainable risk scoring logic
-Working with structured and unstructured data together
-Implementing real-time streaming interfaces
-
-## Future Improvements
-
-Replace rule-based risk engine with ML model
-Add analytics dashboard 
-Time-series analysis of user wellbeing
-Notification system (SMS / email integration)
-User segmentation and personalization
+---
