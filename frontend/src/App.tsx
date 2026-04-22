@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import "./index.css";
 import {
   createUser,
+  deleteMessages,
   getMessages,
   getUserRiskAnalysis,
   getUsers,
@@ -11,7 +12,6 @@ import {
 } from "./api";
 import type { ConversationMessage } from "./types";
 import ChatWindow from "./components/ChatWindow";
-import { deleteMessages } from "./api";
 
 const TEST_USER = {
   first_name: "Maija",
@@ -57,9 +57,9 @@ export default function App() {
 
   function applyUserMeta(user: User) {
     setUserId(user.id);
-    setUserName(`${user.first_name} ${user.last_name}`);
-    setUserLanguage(user.language);
-    setSelectedLanguage(user.language || "en");
+    setUserName([user.first_name, user.last_name].filter(Boolean).join(" "));
+    setUserLanguage(user.language || "fi");
+    setSelectedLanguage(user.language || "fi");
     storeUserId(user.id);
   }
 
@@ -108,12 +108,25 @@ export default function App() {
 
       const currentUser = await ensureUser();
 
-      await Promise.all([
+      const [messagesResult, riskResult] = await Promise.allSettled([
         loadMessages(currentUser.id),
         loadRiskAnalysis(currentUser.id),
       ]);
+
+      if (messagesResult.status === "rejected") {
+        console.warn("loadMessages failed:", messagesResult.reason);
+        setMessages([]);
+      }
+
+      if (riskResult.status === "rejected") {
+        console.warn("loadRiskAnalysis failed:", riskResult.reason);
+        setRiskAnalyses([]);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to initialize app");
+      console.warn("bootstrap failed, app stays in demo mode:", err);
+      setMessages([]);
+      setRiskAnalyses([]);
+      setError("Failed to connect to backend. App is running in demo mode.");
     } finally {
       setBootstrapping(false);
     }
@@ -125,11 +138,12 @@ export default function App() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    const now = Date.now();
+    const pendingAssistantId = now + 1;
+
     try {
       setLoading(true);
       setError(null);
-
-      const now = Date.now();
 
       const userMessage: ConversationMessage = {
         id: now,
@@ -138,9 +152,8 @@ export default function App() {
         created_at: new Date().toISOString(),
       };
 
-      const assistantMessageId = now + 1;
       const assistantPlaceholder: ConversationMessage = {
-        id: assistantMessageId,
+        id: pendingAssistantId,
         role: "assistant",
         content: "",
         created_at: new Date().toISOString(),
@@ -157,7 +170,7 @@ export default function App() {
         (chunk) => {
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === assistantMessageId
+              msg.id === pendingAssistantId
                 ? {
                     ...msg,
                     content: msg.content + chunk,
@@ -168,10 +181,33 @@ export default function App() {
         },
       );
 
-      await Promise.all([loadMessages(userId), loadRiskAnalysis(userId)]);
+      const [messagesResult, riskResult] = await Promise.allSettled([
+        loadMessages(userId),
+        loadRiskAnalysis(userId),
+      ]);
+
+      if (messagesResult.status === "rejected") {
+        console.warn("Post-send loadMessages failed:", messagesResult.reason);
+      }
+
+      if (riskResult.status === "rejected") {
+        console.warn("Post-send loadRiskAnalysis failed:", riskResult.reason);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message");
-      await Promise.all([loadMessages(userId), loadRiskAnalysis(userId)]);
+      console.warn("Send failed, demo fallback:", err);
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === pendingAssistantId
+            ? {
+                ...msg,
+                content: msg.content || "Demo mode: backend is not connected.",
+              }
+            : msg,
+        ),
+      );
+
+      setError("Message sending failed. Showing demo fallback.");
     } finally {
       setLoading(false);
     }
@@ -180,11 +216,21 @@ export default function App() {
   async function handleRefresh() {
     if (!userId) return;
 
-    try {
-      setError(null);
-      await Promise.all([loadMessages(userId), loadRiskAnalysis(userId)]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to refresh data");
+    setError(null);
+
+    const [messagesResult, riskResult] = await Promise.allSettled([
+      loadMessages(userId),
+      loadRiskAnalysis(userId),
+    ]);
+
+    if (messagesResult.status === "rejected") {
+      console.warn("Refresh messages failed:", messagesResult.reason);
+      setMessages([]);
+    }
+
+    if (riskResult.status === "rejected") {
+      console.warn("Refresh risk failed:", riskResult.reason);
+      setRiskAnalyses([]);
     }
   }
 
@@ -192,28 +238,40 @@ export default function App() {
     const selected = users.find((user) => user.id === nextUserId);
     if (!selected) return;
 
-    try {
-      setError(null);
-      applyUserMeta(selected);
-      await Promise.all([
-        loadMessages(selected.id),
-        loadRiskAnalysis(selected.id),
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to switch user");
+    setError(null);
+    applyUserMeta(selected);
+
+    const [messagesResult, riskResult] = await Promise.allSettled([
+      loadMessages(selected.id),
+      loadRiskAnalysis(selected.id),
+    ]);
+
+    if (messagesResult.status === "rejected") {
+      console.warn("Switch user messages failed:", messagesResult.reason);
+      setMessages([]);
+    }
+
+    if (riskResult.status === "rejected") {
+      console.warn("Switch user risk failed:", riskResult.reason);
+      setRiskAnalyses([]);
     }
   }
-  async function handleClearChat() {
-  if (!userId) return;
 
-  try {
-    await deleteMessages(userId);
-    setMessages([]);
-    setRiskAnalyses([]);
-  } catch (err) {
-    setError("Failed to clear chat");
+  async function handleClearChat() {
+    if (!userId) return;
+
+    try {
+      await deleteMessages(userId);
+      setMessages([]);
+      setRiskAnalyses([]);
+      setError(null);
+    } catch (err) {
+      console.warn("Failed to clear chat:", err);
+      setMessages([]);
+      setRiskAnalyses([]);
+      setError("Failed to clear chat in backend. Local state was reset.");
+    }
   }
-}
 
   function handleResetUser() {
     localStorage.removeItem(USER_ID_STORAGE_KEY);
@@ -245,7 +303,7 @@ export default function App() {
             <strong>Name:</strong> {userName}
           </div>
           <div>
-            <strong>Language:</strong> {selectedLanguage}
+            <strong>Language:</strong> {userLanguage}
           </div>
         </div>
 
@@ -312,9 +370,9 @@ export default function App() {
                 <strong>Suggested action:</strong> {latestRisk.suggested_action}
               </div>
 
-              {latestRisk.needs_family_notification && (
-                <div className="risk-alert">Family notification needed</div>
-              )}
+              {latestRisk.should_alert_family && (
+                  <div className="risk-alert">Family notification needed</div>
+                )}
             </>
           ) : (
             <div className="muted-text">No risk analysis yet</div>
@@ -337,9 +395,10 @@ export default function App() {
         >
           Reset user
         </button>
+
         <button
           className="refresh-button"
-          onClick={handleClearChat}
+          onClick={() => void handleClearChat()}
           disabled={!userId || loading}
           style={{ marginTop: "10px", background: "#dc2626" }}
         >

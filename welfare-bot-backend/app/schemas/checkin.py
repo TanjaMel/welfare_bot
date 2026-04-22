@@ -1,40 +1,39 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class DailyCheckInCreate(BaseModel):
+    user_id: int
     checkin_date: date
-    period: str
-    sleep_answer: str | None = None
-    food_answer: str | None = None
-    medication_answer: str | None = None
-    mood_answer: str | None = None
-    extra_notes: str | None = None
-
-
-class DailyCheckInUpdate(BaseModel):
-    period: str | None = None
-    sleep_answer: str | None = None
-    food_answer: str | None = None
-    medication_answer: str | None = None
-    mood_answer: str | None = None
-    extra_notes: str | None = None
-    completed_at: datetime | None = None
+    sleep_quality: str | None = None
+    food_intake: str | None = None
+    hydration: str | None = None
+    mood: str | None = None
+    notes: str | None = None
 
 
 class DailyCheckInRead(BaseModel):
     id: int
     user_id: int
     checkin_date: date
-    period: str
-    sleep_answer: str | None = None
-    food_answer: str | None = None
-    medication_answer: str | None = None
-    mood_answer: str | None = None
-    extra_notes: str | None = None
-    completed_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    sleep_quality: str | None = None
+    food_intake: str | None = None
+    hydration: str | None = None
+    mood: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
 
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
+
+
+class DailyCheckInUpdate(BaseModel):
+    checkin_date: date | None = None
+    sleep_quality: str | None = None
+    food_intake: str | None = None
+    hydration: str | None = None
+    mood: str | None = None
+    notes: str | None = None

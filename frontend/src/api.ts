@@ -1,25 +1,22 @@
 import type {
   ConversationMessage,
   CreateUserRequest,
+  RiskAnalysis,
   SendMessageRequest,
+  SendMessageResponse,
+  User,
 } from "./types";
-
-export type User = {
-  id: number;
-  first_name: string;
-  last_name: string;
-  language: string;
-  phone_number: string;
-};
 
 const API_BASE = "http://127.0.0.1:8000/api/v1";
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed with status ${response.status}`);
+    throw new Error(text || `HTTP error ${response.status}`);
   }
-
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 
@@ -28,96 +25,53 @@ export async function getUsers(): Promise<User[]> {
   return handleResponse<User[]>(response);
 }
 
-export async function createUser(
-  payload: CreateUserRequest,
-): Promise<User> {
+export async function createUser(payload: CreateUserRequest): Promise<User> {
   const response = await fetch(`${API_BASE}/users/`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-
   return handleResponse<User>(response);
 }
 
-export async function getMessages(
-  userId: number,
-): Promise<ConversationMessage[]> {
+// FIXED: removed extra "user/" segment
+export async function getMessages(userId: number): Promise<ConversationMessage[]> {
   const response = await fetch(`${API_BASE}/conversations/${userId}/messages`);
   return handleResponse<ConversationMessage[]>(response);
 }
 
-export async function sendMessageStream(
-  payload: SendMessageRequest,
-  onChunk: (chunk: string) => void,
-): Promise<void> {
-  const response = await fetch(`${API_BASE}/conversations/message/stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+// FIXED: removed extra "user/" segment
+export async function deleteMessages(userId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/conversations/${userId}/messages`, {
+    method: "DELETE",
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Request failed with status ${response.status}`);
-  }
-
-  if (!response.body) {
-    throw new Error("Streaming response body is missing");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      if (chunk) {
-        onChunk(chunk);
-      }
-    }
-
-    const tail = decoder.decode();
-    if (tail) {
-      onChunk(tail);
-    }
-  } finally {
-    reader.releaseLock();
-  }
+  await handleResponse<void>(response);
 }
-export type RiskAnalysis = {
-  id: number;
-  user_id: number;
-  conversation_message_id: number | null;
-  category: string;
-  risk_level: string;
-  needs_family_notification: boolean;
-  reason: string;
-  suggested_action: string;
-  model_version: string;
-  created_at?: string | null;
-};
 
 export async function getUserRiskAnalysis(userId: number): Promise<RiskAnalysis[]> {
   const response = await fetch(`${API_BASE}/conversations/${userId}/risk-analysis`);
   return handleResponse<RiskAnalysis[]>(response);
 }
-export async function deleteMessages(userId: number) {
-  const res = await fetch(`${API_BASE}/conversations/${userId}/messages`, {
-    method: "DELETE",
+
+export async function sendMessage(payload: SendMessageRequest): Promise<SendMessageResponse> {
+  const response = await fetch(`${API_BASE}/conversations/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
-
-  if (!res.ok) {
-    throw new Error("Failed to delete messages");
-  }
-
-  return res.json();
+  return handleResponse<SendMessageResponse>(response);
 }
+
+// Backend does not stream yet — falls back to regular sendMessage
+// onChunk is called once with the full reply
+export async function sendMessageStream(
+  payload: SendMessageRequest,
+  onChunk: (chunk: string) => void,
+): Promise<void> {
+  const result = await sendMessage(payload);
+  if (result.reply) {
+    onChunk(result.reply);
+  }
+}
+
+export type { User, RiskAnalysis };
