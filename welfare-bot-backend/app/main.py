@@ -5,6 +5,11 @@ from fastapi.responses import FileResponse
 import os
 
 from app.api.v1.api import api_router
+from app.db.base import Base
+from app.db.session import engine
+
+# Auto-create all tables on startup
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Welfare Bot API",
@@ -21,7 +26,6 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api/v1")
 
-
 # Serve React frontend static files if they exist
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
@@ -33,7 +37,6 @@ if os.path.exists(static_dir):
 
     @app.get("/{full_path:path}")
     def serve_frontend_routes(full_path: str):
-        # API routes handled above — everything else serves the React app
         if full_path.startswith("api/"):
             return {"detail": "Not found"}
         index_path = f"{static_dir}/index.html"
