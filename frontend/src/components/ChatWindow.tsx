@@ -122,7 +122,8 @@ export default function ChatWindow({
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         await transcribeAudio(audioBlob);
       };
-      mediaRecorder.start();
+      mediaRecorder.start(100); // collect data every 100ms
+    
       setIsRecording(true);
     } catch {
       setRecordingError("Microphone access denied. Please allow microphone access.");
@@ -131,8 +132,15 @@ export default function ChatWindow({
 
   function stopRecording() {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+      // Request any buffered data before stopping
+      mediaRecorderRef.current.requestData();
+      // Small delay to ensure data is collected
+      setTimeout(() => {
+        if (mediaRecorderRef.current) {
+          mediaRecorderRef.current.stop();
+        }
+        setIsRecording(false);
+      }, 300);
     }
   }
 
@@ -259,28 +267,28 @@ export default function ChatWindow({
           onChange={(e) => setInput(e.target.value)}
           disabled={loading || isRecording}
         />
+        {/* Microphone button - press once to start, press again to stop */}
         <button
           type="button"
-          onMouseDown={() => void startRecording()}
-          onMouseUp={stopRecording}
-          onTouchStart={() => void startRecording()}
-          onTouchEnd={stopRecording}
+          onClick={() => isRecording ? stopRecording() : void startRecording()}
           disabled={loading}
-          title="Hold to speak"
+          title={isRecording ? "Press to stop recording" : "Press to start recording"}
           style={{
             background: isRecording ? "#dc2626" : "#475569",
-            border: "none",
+            border: isRecording ? "3px solid #fca5a5" : "3px solid transparent",
             borderRadius: "8px",
             color: "white",
             cursor: "pointer",
             fontSize: "14px",
             padding: "8px 14px",
-            transition: "background 0.2s",
+            transition: "all 0.2s",
             userSelect: "none",
+            animation: isRecording ? "pulse 1s infinite" : "none",
           }}
         >
-          {isRecording ? "Recording..." : "Speak"}
+          {isRecording ? "Stop recording" : "Speak"}
         </button>
+     
         <button
           className="send-button"
           type="submit"
