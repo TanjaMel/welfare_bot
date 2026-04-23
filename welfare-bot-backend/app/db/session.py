@@ -1,21 +1,23 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
+import os
 
-from app.core.config import get_settings
+# Railway provides DATABASE_URL directly — use it if available
+# Otherwise fall back to building from individual settings
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-settings = get_settings()
+if not DATABASE_URL:
+    from app.core.config import get_settings
+    settings = get_settings()
+    DATABASE_URL = settings.database_url
 
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-)
+# Railway PostgreSQL uses postgres:// but SQLAlchemy needs postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db() -> Generator[Session, None, None]:
