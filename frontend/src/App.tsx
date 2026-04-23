@@ -14,7 +14,7 @@ import {
 import type { ConversationMessage } from "./types";
 import ChatWindow from "./components/ChatWindow";
 import LoginPage from "./components/LoginPage";
-
+import CareContactForm from "./components/CareContactForm";
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
 export default function App() {
@@ -289,7 +289,7 @@ export default function App() {
             <div className="muted-text">No risk analysis yet</div>
           )}
         </div>
-
+        {userId && <CareContactForm userId={userId} />}
         <button
           className="refresh-button"
           onClick={() => void handleRefresh()}
