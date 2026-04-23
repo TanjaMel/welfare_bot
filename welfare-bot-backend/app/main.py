@@ -26,9 +26,20 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api/v1")
 
-# Serve React frontend static files if they exist
-static_dir = os.path.join(os.path.dirname(__file__), "static")
-if os.path.exists(static_dir):
+# Serve React frontend — check multiple possible static paths
+POSSIBLE_STATIC_DIRS = [
+    os.path.join(os.path.dirname(__file__), "static"),  # local: app/static
+    "/app/static",                                        # Railway absolute path
+    os.path.join(os.getcwd(), "static"),                 # cwd/static
+]
+
+static_dir = None
+for path in POSSIBLE_STATIC_DIRS:
+    if os.path.exists(path) and os.path.exists(os.path.join(path, "index.html")):
+        static_dir = path
+        break
+
+if static_dir:
     app.mount("/assets", StaticFiles(directory=f"{static_dir}/assets"), name="assets")
 
     @app.get("/")
@@ -40,10 +51,10 @@ if os.path.exists(static_dir):
         if full_path.startswith("api/"):
             return {"detail": "Not found"}
         index_path = f"{static_dir}/index.html"
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-        return {"detail": "Frontend not built"}
+        return FileResponse(index_path)
 else:
     @app.get("/")
     def root():
-        return {"message": "Welfare Bot backend is running"}
+        # Debug: show what paths were checked
+        checked = {p: os.path.exists(p) for p in POSSIBLE_STATIC_DIRS}
+        return {"message": "Welfare Bot backend is running", "static_checked": checked}
