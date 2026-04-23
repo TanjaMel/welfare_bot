@@ -344,6 +344,7 @@ export default function App() {
           onSend={handleSend}
           loading={loading || bootstrapping}
           error={error}
+          language={selectedLanguage}
         />
       </main>
     </div>
