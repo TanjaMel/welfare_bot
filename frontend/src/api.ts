@@ -10,8 +10,9 @@ import type {
   UserRegister,
 } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000/api/v1";
-
+const API_BASE = typeof window !== "undefined" && window.location.hostname !== "localhost"
+  ? "/api/v1"  // on Railway, same domain — use relative URL
+  : "http://127.0.0.1:8000/api/v1";  // local dev
 function getToken(): string | null {
   return localStorage.getItem("access_token");
 }
