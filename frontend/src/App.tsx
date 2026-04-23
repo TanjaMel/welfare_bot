@@ -18,15 +18,102 @@ import CareContactForm from "./components/CareContactForm";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
-function getWellbeingInfo(riskLevel: string | undefined) {
-  if (!riskLevel) return { icon: "🌿", label: "No data yet", sub: "Start a conversation", cls: "none" };
-  switch (riskLevel.toLowerCase()) {
-    case "low": return { icon: "😊", label: "All good", sub: "You're doing well today.", cls: "low" };
-    case "medium": return { icon: "😐", label: "Some concerns", sub: "Let's check in more.", cls: "medium" };
-    case "high": return { icon: "😟", label: "Needs attention", sub: "Please reach out today.", cls: "high" };
-    case "critical": return { icon: "🚨", label: "Critical", sub: "Contact help immediately.", cls: "critical" };
-    default: return { icon: "🌿", label: "No data yet", sub: "Start a conversation", cls: "none" };
+type WellbeingInfo = {
+  label: string;
+  sub: string;
+  cls: "none" | "low" | "medium" | "high" | "critical";
+};
+
+function AppLogo({ small = false }: { small?: boolean }) {
+  return (
+    <div className={`brand-logo ${small ? "small" : ""}`} aria-hidden="true">
+      <svg viewBox="0 0 64 64" fill="none">
+        <defs>
+          <linearGradient id="wbGradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#4F7DF3" />
+            <stop offset="100%" stopColor="#6A8BFF" />
+          </linearGradient>
+        </defs>
+
+        <path
+          d="M32 6L50 16C53.105 17.725 55 21.001 55 24.55V39.45C55 42.999 53.105 46.275 50 48L32 58L14 48C10.895 46.275 9 42.999 9 39.45V24.55C9 21.001 10.895 17.725 14 16L32 6Z"
+          fill="url(#wbGradient)"
+        />
+        <circle cx="32" cy="22" r="6.4" fill="white" />
+        <path
+          d="M21.2 35.2C21.2 33.433 22.633 32 24.4 32H39.2C40.967 32 42.4 33.433 42.4 35.2L34.3 44.4C33.037 45.833 30.814 45.871 29.503 44.483L21.2 35.2Z"
+          fill="white"
+        />
+        <path
+          d="M27.5 36.3L31.4 40.1L40.1 30.8"
+          stroke="#3E6FF2"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function getWellbeingInfo(riskLevel: string | undefined): WellbeingInfo {
+  if (!riskLevel) {
+    return {
+      label: "No recent assessment",
+      sub: "Start or continue the conversation.",
+      cls: "none",
+    };
   }
+
+  switch (riskLevel.toLowerCase()) {
+    case "low":
+      return {
+        label: "Stable condition",
+        sub: "No immediate concerns detected.",
+        cls: "low",
+      };
+    case "medium":
+      return {
+        label: "Needs closer follow-up",
+        sub: "Some concerns were detected.",
+        cls: "medium",
+      };
+    case "high":
+      return {
+        label: "Attention recommended",
+        sub: "Support may be needed soon.",
+        cls: "high",
+      };
+    case "critical":
+      return {
+        label: "Urgent attention needed",
+        sub: "Immediate action may be required.",
+        cls: "critical",
+      };
+    default:
+      return {
+        label: "No recent assessment",
+        sub: "Start or continue the conversation.",
+        cls: "none",
+      };
+  }
+}
+
+function getStoredUserId(): number | null {
+  const raw = localStorage.getItem(USER_ID_STORAGE_KEY);
+  if (!raw) return null;
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    localStorage.removeItem(USER_ID_STORAGE_KEY);
+    return null;
+  }
+
+  return parsed;
+}
+
+function storeUserId(id: number) {
+  localStorage.setItem(USER_ID_STORAGE_KEY, String(id));
 }
 
 export default function App() {
@@ -42,19 +129,9 @@ export default function App() {
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const latestRisk = useMemo(() => riskAnalyses.length > 0 ? riskAnalyses[0] : null, [riskAnalyses]);
+  const latestRisk = useMemo(() => (riskAnalyses.length > 0 ? riskAnalyses[0] : null), [riskAnalyses]);
   const wellbeing = getWellbeingInfo(latestRisk?.risk_level);
   const userInitial = userName ? userName.charAt(0).toUpperCase() : "?";
-
-  function getStoredUserId(): number | null {
-    const raw = localStorage.getItem(USER_ID_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = Number(raw);
-    if (!Number.isInteger(parsed) || parsed <= 0) { localStorage.removeItem(USER_ID_STORAGE_KEY); return null; }
-    return parsed;
-  }
-
-  function storeUserId(id: number) { localStorage.setItem(USER_ID_STORAGE_KEY, String(id)); }
 
   function applyUserMeta(user: User) {
     setUserId(user.id);
@@ -68,80 +145,141 @@ export default function App() {
     setRiskAnalyses(data);
   }
 
+  async function loadConversationData(id: number) {
+    const [, riskResult] = await Promise.allSettled([Promise.resolve(), loadRiskAnalysis(id)]);
+    if (riskResult.status === "rejected") {
+      setRiskAnalyses([]);
+    }
+
+    try {
+      const allMessages = await getMessages(id);
+      const todayMessages = allMessages.filter(
+        (m) => new Date(m.created_at).toDateString() === new Date().toDateString()
+      );
+
+      if (todayMessages.length === 0) {
+        await startConversation(id);
+        const refreshed = await getMessages(id);
+        setMessages(refreshed);
+      } else {
+        setMessages(allMessages);
+      }
+    } catch (e) {
+      console.warn("Could not load/start conversation:", e);
+      setMessages([]);
+    }
+  }
+
   async function bootstrap() {
     try {
       setBootstrapping(true);
       setError(null);
+
       const stored = localStorage.getItem("current_user");
       const currentUser: User | null = stored ? JSON.parse(stored) : null;
-      if (!currentUser) { setError("Session expired. Please log in again."); setBootstrapping(false); return; }
+
+      if (!currentUser) {
+        setError("Session expired. Please log in again.");
+        setBootstrapping(false);
+        return;
+      }
+
       setCurrentUserRole(currentUser.role ?? "user");
+
+      let activeUser: User | null = null;
+
       if (currentUser.role === "admin") {
         const allUsers = await getUsers();
         setUsers(allUsers);
+
         const storedId = getStoredUserId();
-        const target = storedId ? allUsers.find((u) => u.id === storedId) ?? allUsers[0] : allUsers[0];
-        if (target) applyUserMeta(target);
+        activeUser = storedId ? allUsers.find((u) => u.id === storedId) ?? allUsers[0] : allUsers[0];
       } else {
         setUsers([currentUser]);
-        applyUserMeta(currentUser);
+        activeUser = currentUser;
       }
-      const id = currentUser.id;
-      const [, riskResult] = await Promise.allSettled([Promise.resolve(), loadRiskAnalysis(id)]);
-      if (riskResult.status === "rejected") setRiskAnalyses([]);
-      try {
-        const allMessages = await getMessages(id);
-        const todayMessages = allMessages.filter((m) =>
-          new Date(m.created_at).toDateString() === new Date().toDateString()
-        );
-        if (todayMessages.length === 0) {
-          await startConversation(id);
-          const refreshed = await getMessages(id);
-          setMessages(refreshed);
-        } else {
-          setMessages(allMessages);
-        }
-      } catch (e) { console.warn("Could not load/start conversation:", e); setMessages([]); }
-    } catch (err) { console.warn("bootstrap failed:", err); setMessages([]); setRiskAnalyses([]); setError("Failed to load data."); }
-    finally { setBootstrapping(false); }
+
+      if (!activeUser) {
+        setError("No available user found.");
+        setMessages([]);
+        setRiskAnalyses([]);
+        return;
+      }
+
+      applyUserMeta(activeUser);
+      await loadConversationData(activeUser.id);
+    } catch (err) {
+      console.warn("bootstrap failed:", err);
+      setMessages([]);
+      setRiskAnalyses([]);
+      setError("Failed to load data.");
+    } finally {
+      setBootstrapping(false);
+    }
   }
 
   async function handleSend(text: string) {
     if (!userId) return;
+
     const trimmed = text.trim();
     if (!trimmed) return;
+
     const now = Date.now();
     const pendingAssistantId = now + 1;
+
     try {
-      setLoading(true); setError(null);
-      setMessages((prev) => [...prev,
+      setLoading(true);
+      setError(null);
+
+      setMessages((prev) => [
+        ...prev,
         { id: now, role: "user", content: trimmed, created_at: new Date().toISOString() },
         { id: pendingAssistantId, role: "assistant", content: "", created_at: new Date().toISOString() },
       ]);
+
       await sendMessageStream(
         { user_id: userId, message: trimmed, language: "auto" },
         (chunk) => {
-          setMessages((prev) => prev.map((msg) =>
-            msg.id === pendingAssistantId ? { ...msg, content: msg.content + chunk } : msg
-          ));
-        },
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === pendingAssistantId ? { ...msg, content: msg.content + chunk } : msg
+            )
+          );
+        }
       );
-      const [refreshed, riskData] = await Promise.allSettled([getMessages(userId), getUserRiskAnalysis(userId)]);
+
+      const [refreshed, riskData] = await Promise.allSettled([
+        getMessages(userId),
+        getUserRiskAnalysis(userId),
+      ]);
+
       if (refreshed.status === "fulfilled") setMessages(refreshed.value);
       if (riskData.status === "fulfilled") setRiskAnalyses(riskData.value);
     } catch (err) {
       console.warn("Send failed:", err);
-      setMessages((prev) => prev.map((msg) =>
-        msg.id === pendingAssistantId ? { ...msg, content: msg.content || "Failed to send." } : msg
-      ));
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === pendingAssistantId ? { ...msg, content: msg.content || "Failed to send." } : msg
+        )
+      );
+
       setError("Message sending failed.");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleRefresh() {
     if (!userId) return;
+
     setError(null);
-    const [refreshed, riskData] = await Promise.allSettled([getMessages(userId), getUserRiskAnalysis(userId)]);
+
+    const [refreshed, riskData] = await Promise.allSettled([
+      getMessages(userId),
+      getUserRiskAnalysis(userId),
+    ]);
+
     if (refreshed.status === "fulfilled") setMessages(refreshed.value);
     if (riskData.status === "fulfilled") setRiskAnalyses(riskData.value);
   }
@@ -149,112 +287,171 @@ export default function App() {
   async function handleUserChange(nextUserId: number) {
     const selected = users.find((u) => u.id === nextUserId);
     if (!selected) return;
-    setError(null); applyUserMeta(selected);
-    const [refreshed, riskData] = await Promise.allSettled([getMessages(selected.id), getUserRiskAnalysis(selected.id)]);
-    if (refreshed.status === "fulfilled") setMessages(refreshed.value);
-    if (riskData.status === "fulfilled") setRiskAnalyses(riskData.value);
+
+    setError(null);
+    applyUserMeta(selected);
+    await loadConversationData(selected.id);
   }
 
   async function handleClearChat() {
     if (!userId) return;
-    try { await deleteMessages(userId); setMessages([]); setRiskAnalyses([]); }
-    catch { setMessages([]); setRiskAnalyses([]); }
+
+    try {
+      await deleteMessages(userId);
+      setMessages([]);
+      setRiskAnalyses([]);
+    } catch {
+      setMessages([]);
+      setRiskAnalyses([]);
+    }
   }
 
-  useEffect(() => { if (isAuthenticated) void bootstrap(); }, [isAuthenticated]);
+  useEffect(() => {
+    if (isAuthenticated) {
+      void bootstrap();
+    }
+  }, [isAuthenticated]);
 
-  if (!isAuthenticated) return <LoginPage onSuccess={() => setIsAuthenticated(true)} />;
+  if (!isAuthenticated) {
+    return <LoginPage onSuccess={() => setIsAuthenticated(true)} />;
+  }
 
   const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-logo">🤝</div>
-          <div>
+        <div className="sidebar-brand">
+          <AppLogo />
+          <div className="sidebar-brand-copy">
             <h2>Welfare Bot</h2>
-            <p>AI-powered assistant</p>
+            <p>Care. Support. Well-being.</p>
           </div>
         </div>
 
-        <div className="user-card">
-          <div className="user-avatar">{userInitial}</div>
-          <div>
-            <div className="user-info-name">{userName}</div>
-            <div className="user-info-sub">Hello! 👋</div>
+        <section className="sidebar-card profile-card">
+          <div className="profile-avatar">{userInitial}</div>
+          <div className="profile-copy">
+            <div className="profile-name">{userName}</div>
+            <div className="profile-sub">Current user</div>
           </div>
-        </div>
+        </section>
 
         {currentUserRole === "admin" && users.length > 1 && (
-          <div className="sidebar-card">
-            <label className="field-label" htmlFor="user-select">Select user</label>
-            <select
-              id="user-select"
-              className="user-select"
-              value={userId ?? ""}
-              onChange={(e) => void handleUserChange(Number(e.target.value))}
-              disabled={loading || bootstrapping}
-            >
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.first_name} {user.last_name} (#{user.id})
-                </option>
-              ))}
-            </select>
-          </div>
+          <section className="sidebar-section">
+            <h3 className="section-title">User selection</h3>
+            <div className="sidebar-card">
+              <label className="field-label" htmlFor="user-select">
+                Active user
+              </label>
+              <select
+                id="user-select"
+                className="user-select"
+                value={userId ?? ""}
+                onChange={(e) => void handleUserChange(Number(e.target.value))}
+                disabled={loading || bootstrapping}
+              >
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.first_name} {user.last_name} (#{user.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
         )}
 
-        <div className="wellbeing-card">
-          <div className="wellbeing-label">Your well-being today</div>
-          <div className="wellbeing-status">
-            <div className={`wellbeing-icon ${wellbeing.cls}`}>{wellbeing.icon}</div>
-            <div>
+        <section className="sidebar-section">
+          <h3 className="section-title">Today’s status</h3>
+          <div className="sidebar-card wellbeing-card redesigned">
+            <div className={`wellbeing-status-dot ${wellbeing.cls}`} />
+            <div className="wellbeing-copy">
               <div className="wellbeing-text-main">{wellbeing.label}</div>
               <div className="wellbeing-text-sub">{wellbeing.sub}</div>
+
+              {latestRisk?.reason && (
+                <div className="risk-meta-block">
+                  <span className="risk-meta-label">Reason</span>
+                  <p>{latestRisk.reason}</p>
+                </div>
+              )}
+
+              {latestRisk?.suggested_action && (
+                <div className="risk-meta-block">
+                  <span className="risk-meta-label">Suggested action</span>
+                  <p>{latestRisk.suggested_action}</p>
+                </div>
+              )}
+
+              {latestRisk?.follow_up_question && (
+                <div className="risk-meta-block">
+                  <span className="risk-meta-label">Follow-up</span>
+                  <p>{latestRisk.follow_up_question}</p>
+                </div>
+              )}
+
+              {(latestRisk?.needs_family_notification || latestRisk?.should_alert_family) && (
+                <div className="risk-notice">
+                  Family notification recommended
+                </div>
+              )}
+
+              <div className="wellbeing-time">Checked at {timeStr}</div>
             </div>
           </div>
-          {latestRisk && (
-            <>
-              {latestRisk.reason && <div className="risk-meta" style={{ marginTop: "8px" }}><strong>Reason:</strong> {latestRisk.reason}</div>}
-              {latestRisk.suggested_action && <div className="risk-meta"><strong>Action:</strong> {latestRisk.suggested_action}</div>}
-              {latestRisk.follow_up_question && <div className="risk-meta" style={{ fontStyle: "italic" }}>{latestRisk.follow_up_question}</div>}
-              {(latestRisk.needs_family_notification || latestRisk.should_alert_family) && (
-                <div className="risk-alert">⚠️ Family notification needed</div>
-              )}
-            </>
-          )}
-          <div className="wellbeing-time">🕐 Checked at {timeStr}</div>
+        </section>
+
+        <section className="sidebar-section">
+          <h3 className="section-title">Care contact</h3>
+          {userId && <CareContactForm userId={userId} />}
+        </section>
+
+        <section className="sidebar-section">
+          <h3 className="section-title">Quick actions</h3>
+          <div className="actions-list">
+            <button
+              className="action-item"
+              onClick={() => void handleRefresh()}
+              disabled={!userId || loading || bootstrapping}
+            >
+              <span>
+                <strong>Refresh conversation</strong>
+                <small>Get the latest updates</small>
+              </span>
+              <span className="action-arrow">›</span>
+            </button>
+
+            <button
+              className="action-item"
+              onClick={() => void handleClearChat()}
+              disabled={!userId || loading}
+            >
+              <span>
+                <strong>Clear chat</strong>
+                <small>Start a new conversation</small>
+              </span>
+              <span className="action-arrow">›</span>
+            </button>
+
+            <button className="action-item" onClick={() => logout()}>
+              <span>
+                <strong>Log out</strong>
+                <small>Sign out from your account</small>
+              </span>
+              <span className="action-arrow">›</span>
+            </button>
+          </div>
+        </section>
+
+        <div className="sidebar-footer">
+          Reliable conversational support
         </div>
-
-        {userId && <CareContactForm userId={userId} />}
-
-        <div className="quick-actions">
-          <div className="card-title" style={{ padding: "8px 12px 4px" }}>Quick actions</div>
-          <button className="quick-action-btn" onClick={() => void handleRefresh()} disabled={!userId || loading || bootstrapping}>
-            <div className="action-icon blue">🔄</div>
-            <div><div className="action-text-main">Refresh conversation</div><div className="action-text-sub">Get the latest updates</div></div>
-            <span className="action-arrow">›</span>
-          </button>
-          <button className="quick-action-btn" onClick={() => void handleClearChat()} disabled={!userId || loading}>
-            <div className="action-icon red">🗑️</div>
-            <div><div className="action-text-main">Clear chat</div><div className="action-text-sub">Start a new conversation</div></div>
-            <span className="action-arrow">›</span>
-          </button>
-          <button className="quick-action-btn" onClick={() => logout()}>
-            <div className="action-icon gray">↪️</div>
-            <div><div className="action-text-main">Log out</div><div className="action-text-sub">Sign out from your account</div></div>
-            <span className="action-arrow">›</span>
-          </button>
-        </div>
-
-        <div className="sidebar-footer">Welfare Bot is here to support you 💙</div>
       </aside>
 
       <main className="main-panel">
         <ChatWindow
-          title="Chat with Welfare Bot"
-          subtitle="Your AI companion for well-being and support"
+          title="Welfare Bot Chat"
+          subtitle="Reliable conversational support for everyday well-being"
           messages={messages}
           onSend={handleSend}
           loading={loading || bootstrapping}
