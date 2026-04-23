@@ -34,7 +34,7 @@ export default function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("Loading...");
-  const [userLanguage, setUserLanguage] = useState<string>("fi");
+  const [_userLanguage, setUserLanguage] = useState<string>("fi");
   const [currentUserRole, setCurrentUserRole] = useState<string>("user");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [riskAnalyses, setRiskAnalyses] = useState<RiskAnalysis[]>([]);
