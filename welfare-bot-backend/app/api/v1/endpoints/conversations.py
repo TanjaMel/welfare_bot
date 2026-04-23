@@ -88,7 +88,7 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# POST /start  ← NEW: bot sends opening message if no messages today
+# POST /start
 # ---------------------------------------------------------------------------
 @router.post(
     "/start",
@@ -101,7 +101,6 @@ def start_conversation(
     language: str = "fi",
     db: Session = Depends(get_db),
 ):
-    # Check if bot already sent an opening message today
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -117,10 +116,8 @@ def start_conversation(
     )
 
     if existing_today:
-        # Already started today — return the first message of today
         return existing_today
 
-    # Generate and save opening message
     opening_text = get_opening_message(language)
 
     msg = ConversationMessage(
@@ -172,11 +169,11 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
 
     # 3. Risk assessment
     result = risk_service.assess(
-    current_message=payload.message,
-    recent_user_messages=recent_texts,
-    preferred_language=None,
-    elderly=True,
-)
+        current_message=payload.message,
+        recent_user_messages=recent_texts,
+        preferred_language=None,
+        elderly=True,
+    )
 
     # 4. Update user message risk fields
     user_msg.risk_level = result["risk_level"]
@@ -222,10 +219,47 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         db.refresh(notif)
         notifications_out.append(NotificationRead.model_validate(notif).model_dump())
 
-    # 7. Count how many user messages today to decide reply style
+    # 7. Count total messages today (user + assistant) for daily limit
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
+    total_messages_today = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.user_id == payload.user_id,
+            ConversationMessage.created_at >= today_start,
+        )
+        .count()
+    )
+
+    # 8. Daily message limit — 20 messages per day
+    if total_messages_today > 20:
+        detected_lang = result.get("language", "fi")
+        closing_messages = {
+            "fi": "Olemme jutelleet paljon tänään. Olen iloinen, että jaoit ajatuksesi kanssani. Jatketaan huomenna. Pidä huolta itsestäsi.",
+            "en": "We have talked a lot today. I am glad you shared with me. Let's continue tomorrow. Take care.",
+            "sv": "Vi har pratat mycket idag. Jag är glad att du delade med mig. Vi fortsätter imorgon. Ta hand om dig.",
+        }
+        closing = closing_messages.get(detected_lang, closing_messages["en"])
+
+        assistant_msg = ConversationMessage(
+            user_id=payload.user_id,
+            role="assistant",
+            content=closing,
+            message_type="free_chat",
+        )
+        db.add(assistant_msg)
+        db.commit()
+        db.refresh(assistant_msg)
+
+        return SendMessageResponse(
+            reply=closing,
+            risk_analysis=RiskAnalysisResponse.model_validate(risk).model_dump(),
+            notifications=notifications_out,
+            mode="non_stream",
+        )
+
+    # 9. Count user messages today for reply style
     user_messages_today = (
         db.query(ConversationMessage)
         .filter(
@@ -236,7 +270,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         .count()
     )
 
-    # 8. Generate reply
+    # 10. Generate reply
     ai_reply = _generate_reply(
         message=payload.message,
         language=result["language"],
@@ -247,7 +281,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         user_id=payload.user_id,
     )
 
-    # 9. Save assistant message
+    # 11. Save assistant message
     assistant_msg = ConversationMessage(
         user_id=payload.user_id,
         role="assistant",
@@ -297,7 +331,6 @@ def _generate_reply(
             .all()
         )
 
-        # System prompt varies based on risk level and how far into the conversation we are
         system_prompts = {
             "fi": (
                 "Olet lämminhenkinen hyvinvointiassistentti iäkkäille ihmisille. "
@@ -325,10 +358,37 @@ def _generate_reply(
             ),
         }
 
-        system_prompt = system_prompts.get(language, system_prompts["en"])
+        # Override for high/critical risk
+        if risk_level in ("high", "critical"):
+            high_risk_prompts = {
+                "fi": (
+                    "Olet hyvinvointiassistentti. Henkilöllä on korkea riskitaso. "
+                    "Vastaa lyhyesti, lämpimästi ja suoraan. "
+                    "Kysy yksi tarkka kysymys: onko hän turvassa juuri nyt ja onko joku lähellä. "
+                    "Suosittele selkeästi ottamaan yhteyttä läheiseen tai hoitajaan tänään. "
+                    "Älä jatka normaalia keskustelua — keskity turvallisuuteen."
+                ),
+                "en": (
+                    "You are a welfare assistant. This person has a high risk level. "
+                    "Respond briefly, warmly and directly. "
+                    "Ask one specific question: are they safe right now and is anyone nearby. "
+                    "Clearly recommend they contact a trusted person or care worker today. "
+                    "Do not continue normal conversation — focus on their safety."
+                ),
+                "sv": (
+                    "Du är en välfärdsassistent. Denna person har hög risknivå. "
+                    "Svara kort, varmt och direkt. "
+                    "Ställ en specifik fråga: är de trygga just nu och finns någon i närheten. "
+                    "Rekommendera tydligt att de kontaktar en närstående eller vårdare idag. "
+                    "Fortsätt inte normalt samtal — fokusera på deras säkerhet."
+                ),
+            }
+            system_prompt = high_risk_prompts.get(language, high_risk_prompts["en"])
+        else:
+            system_prompt = system_prompts.get(language, system_prompts["en"])
 
-        # Add follow-up instruction if this is an early message
-        if user_messages_today <= 2 and follow_up:
+        # Add follow-up instruction if early in conversation
+        if user_messages_today <= 2 and follow_up and risk_level not in ("high", "critical"):
             follow_up_instructions = {
                 "fi": f" Kun olet vastannut, kysy luonnollisesti: {follow_up}",
                 "en": f" After responding, naturally ask: {follow_up}",
@@ -350,7 +410,6 @@ def _generate_reply(
 
     except Exception as e:
         logger.error(f"OpenAI call failed: {type(e).__name__}: {e}")
-        # Fallback with follow-up if early in conversation
         if user_messages_today <= 2 and follow_up:
             fallback = {
                 "fi": f"Kiitos vastauksestasi. {follow_up}",
