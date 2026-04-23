@@ -27,5 +27,4 @@ class CareContact(Base):
         onupdate=datetime.utcnow,
     )
 
-    user = relationship("User", back_populates="care_contacts")
-    notifications = relationship("Notification", back_populates="care_contact")
+   

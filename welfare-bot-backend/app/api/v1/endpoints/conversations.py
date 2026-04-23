@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone, date
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -18,12 +19,20 @@ from app.schemas.conversation import (
 from app.schemas.risk_analysis import RiskAnalysisResponse
 from app.schemas.notification import NotificationRead
 from app.services import risk_service
+from app.services.conversation_starter import get_opening_message, get_follow_up
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/{user_id}/messages", response_model=List[ConversationMessageRead], summary="Get Messages")
+# ---------------------------------------------------------------------------
+# GET /{user_id}/messages
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{user_id}/messages",
+    response_model=List[ConversationMessageRead],
+    summary="Get Messages",
+)
 def get_messages(user_id: int, db: Session = Depends(get_db)):
     return (
         db.query(ConversationMessage)
@@ -33,13 +42,25 @@ def get_messages(user_id: int, db: Session = Depends(get_db)):
     )
 
 
+# ---------------------------------------------------------------------------
+# DELETE /{user_id}/messages
+# ---------------------------------------------------------------------------
 @router.delete("/{user_id}/messages", status_code=204, summary="Delete User Messages")
 def delete_messages(user_id: int, db: Session = Depends(get_db)):
-    db.query(ConversationMessage).filter(ConversationMessage.user_id == user_id).delete()
+    db.query(ConversationMessage).filter(
+        ConversationMessage.user_id == user_id
+    ).delete()
     db.commit()
 
 
-@router.get("/{user_id}/risk-analysis", response_model=List[RiskAnalysisResponse], summary="Get User Risk Analysis")
+# ---------------------------------------------------------------------------
+# GET /{user_id}/risk-analysis
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{user_id}/risk-analysis",
+    response_model=List[RiskAnalysisResponse],
+    summary="Get User Risk Analysis",
+)
 def get_user_risk(user_id: int, db: Session = Depends(get_db)):
     return (
         db.query(RiskAnalysis)
@@ -49,7 +70,14 @@ def get_user_risk(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{user_id}/notifications", response_model=List[NotificationRead], summary="Get User Notifications")
+# ---------------------------------------------------------------------------
+# GET /{user_id}/notifications
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{user_id}/notifications",
+    response_model=List[NotificationRead],
+    summary="Get User Notifications",
+)
 def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
     return (
         db.query(Notification)
@@ -59,7 +87,63 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/message", response_model=SendMessageResponse, status_code=201, summary="Send Message")
+# ---------------------------------------------------------------------------
+# POST /start  ← NEW: bot sends opening message if no messages today
+# ---------------------------------------------------------------------------
+@router.post(
+    "/start",
+    response_model=ConversationMessageRead,
+    status_code=201,
+    summary="Start conversation — bot sends opening message",
+)
+def start_conversation(
+    user_id: int,
+    language: str = "fi",
+    db: Session = Depends(get_db),
+):
+    # Check if bot already sent an opening message today
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    existing_today = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.user_id == user_id,
+            ConversationMessage.role == "assistant",
+            ConversationMessage.created_at >= today_start,
+        )
+        .first()
+    )
+
+    if existing_today:
+        # Already started today — return the first message of today
+        return existing_today
+
+    # Generate and save opening message
+    opening_text = get_opening_message(language)
+
+    msg = ConversationMessage(
+        user_id=user_id,
+        role="assistant",
+        content=opening_text,
+        message_type="checkin_start",
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+# ---------------------------------------------------------------------------
+# POST /message
+# ---------------------------------------------------------------------------
+@router.post(
+    "/message",
+    response_model=SendMessageResponse,
+    status_code=201,
+    summary="Send Message",
+)
 def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
     # 1. Save user message
     user_msg = ConversationMessage(
@@ -99,7 +183,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
     user_msg.risk_score = result["score"]
     user_msg.risk_category = result["category"]
 
-    # 5. Save RiskAnalysis — using REAL DB column name: needs_family_notification
+    # 5. Save RiskAnalysis
     risk = RiskAnalysis(
         user_id=payload.user_id,
         daily_checkin_id=None,
@@ -107,7 +191,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         category=result["category"],
         risk_level=result["risk_level"],
         risk_score=result["score"],
-        needs_family_notification=result["should_alert_family"],  # ← real DB column
+        needs_family_notification=result["should_alert_family"],
         reason="; ".join(result["reasons"]) if result["reasons"] else None,
         suggested_action=result["suggested_action"],
         follow_up_question=result["follow_up_question"],
@@ -138,16 +222,32 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         db.refresh(notif)
         notifications_out.append(NotificationRead.model_validate(notif).model_dump())
 
-    # 7. Generate AI reply
+    # 7. Count how many user messages today to decide reply style
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    user_messages_today = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.user_id == payload.user_id,
+            ConversationMessage.role == "user",
+            ConversationMessage.created_at >= today_start,
+        )
+        .count()
+    )
+
+    # 8. Generate reply
     ai_reply = _generate_reply(
         message=payload.message,
         language=result["language"],
         follow_up=result["follow_up_question"],
+        risk_level=result["risk_level"],
+        user_messages_today=user_messages_today,
         db=db,
         user_id=payload.user_id,
     )
 
-    # 8. Save assistant message
+    # 9. Save assistant message
     assistant_msg = ConversationMessage(
         user_id=payload.user_id,
         role="assistant",
@@ -166,12 +266,26 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
     )
 
 
+# ---------------------------------------------------------------------------
+# POST /message/stream
+# ---------------------------------------------------------------------------
 @router.post("/message/stream", summary="Send Message Stream")
 def send_message_stream(payload: SendMessageRequest):
     return {"detail": "Streaming not yet implemented"}
 
 
-def _generate_reply(message: str, language: str, follow_up: str, db: Session, user_id: int) -> str:
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+def _generate_reply(
+    message: str,
+    language: str,
+    follow_up: str,
+    risk_level: str,
+    user_messages_today: int,
+    db: Session,
+    user_id: int,
+) -> str:
     try:
         from app.integrations.openai_client import client
 
@@ -183,14 +297,44 @@ def _generate_reply(message: str, language: str, follow_up: str, db: Session, us
             .all()
         )
 
+        # System prompt varies based on risk level and how far into the conversation we are
         system_prompts = {
-            "fi": "Olet ystävällinen hyvinvointiassistentti iäkkäille. Vastaa lyhyesti ja lämpimästi suomeksi.",
-            "sv": "Du är en vänlig välfärdsassistent för äldre. Svara kort och varmt på svenska.",
-            "en": "You are a friendly welfare assistant for elderly people. Respond briefly and warmly.",
+            "fi": (
+                "Olet lämminhenkinen hyvinvointiassistentti iäkkäille ihmisille. "
+                "Tehtäväsi on selvittää, miten henkilö voi: uni, ruoka, juominen, kipu ja mieliala. "
+                "Kysy yksi asia kerrallaan. Älä listaa kysymyksiä. "
+                "Vastaa lyhyesti ja lämpimästi. "
+                "Jos henkilö mainitsee kipua tai huolia, kysy tarkentava kysymys. "
+                "Jos riski on korkea, ilmaise huolesi rauhallisesti ja suosittele yhteydenottoa läheiseen."
+            ),
+            "en": (
+                "You are a warm welfare assistant for elderly people. "
+                "Your job is to understand how the person is doing: sleep, food, hydration, pain, mood. "
+                "Ask one thing at a time. Never list questions. "
+                "Respond briefly and warmly. "
+                "If they mention pain or worry, ask a follow-up. "
+                "If risk is high, calmly express concern and suggest contacting a trusted person."
+            ),
+            "sv": (
+                "Du är en varm välfärdsassistent för äldre. "
+                "Ditt jobb är att förstå hur personen mår: sömn, mat, dryck, smärta, humör. "
+                "Ställ en fråga i taget. Lista aldrig frågor. "
+                "Svara kort och varmt. "
+                "Om de nämner smärta eller oro, ställ en följdfråga. "
+                "Om risken är hög, uttryck lugnt din oro och föreslå kontakt med en närstående."
+            ),
         }
+
         system_prompt = system_prompts.get(language, system_prompts["en"])
-        if follow_up:
-            system_prompt += f" End your reply with this follow-up question: {follow_up}"
+
+        # Add follow-up instruction if this is an early message
+        if user_messages_today <= 2 and follow_up:
+            follow_up_instructions = {
+                "fi": f" Kun olet vastannut, kysy luonnollisesti: {follow_up}",
+                "en": f" After responding, naturally ask: {follow_up}",
+                "sv": f" Efter att ha svarat, fråga naturligt: {follow_up}",
+            }
+            system_prompt += follow_up_instructions.get(language, follow_up_instructions["en"])
 
         messages = [{"role": "system", "content": system_prompt}]
         for msg in reversed(history):
@@ -199,16 +343,24 @@ def _generate_reply(message: str, language: str, follow_up: str, db: Session, us
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            max_tokens=300,
-            temperature=0.7,
+            max_tokens=200,
+            temperature=0.6,
         )
         return response.choices[0].message.content.strip()
 
     except Exception as e:
         logger.error(f"OpenAI call failed: {type(e).__name__}: {e}")
-        fallback = {
-            "fi": f"Kiitos viestistäsi. {follow_up}",
-            "sv": f"Tack för ditt meddelande. {follow_up}",
-            "en": f"Thank you for your message. {follow_up}",
-        }
+        # Fallback with follow-up if early in conversation
+        if user_messages_today <= 2 and follow_up:
+            fallback = {
+                "fi": f"Kiitos vastauksestasi. {follow_up}",
+                "sv": f"Tack för ditt svar. {follow_up}",
+                "en": f"Thank you for sharing. {follow_up}",
+            }
+        else:
+            fallback = {
+                "fi": "Kiitos. Pidän sinut mielessäni.",
+                "sv": "Tack. Jag tänker på dig.",
+                "en": "Thank you. I'm keeping you in mind.",
+            }
         return fallback.get(language, fallback["en"])

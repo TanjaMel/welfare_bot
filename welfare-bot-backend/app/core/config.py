@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
+    # Required for JWT — set in .env
+    secret_key: str = "change-this-to-a-long-random-secret"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

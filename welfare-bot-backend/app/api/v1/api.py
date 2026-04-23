@@ -1,8 +1,17 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import users, care_contacts, checkins, conversations, risk_analysis, notifications
+from app.api.v1.endpoints import (
+    auth,
+    users,
+    care_contacts,
+    checkins,
+    conversations,
+    risk_analysis,
+    notifications,
+)
 
 api_router = APIRouter()
 
+api_router.include_router(auth.router,          prefix="/auth",          tags=["auth"])
 api_router.include_router(users.router,         prefix="/users",         tags=["users"])
 api_router.include_router(care_contacts.router, prefix="/care-contacts", tags=["care-contacts"])
 api_router.include_router(checkins.router,      prefix="/checkins",      tags=["checkins"])

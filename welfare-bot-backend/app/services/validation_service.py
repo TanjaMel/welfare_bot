@@ -4,118 +4,77 @@ from dataclasses import dataclass
 import re
 
 
-MAX_MESSAGE_LENGTH = 500
-MIN_MEANINGFUL_LENGTH = 2
-MAX_REPEATED_CHAR_RUN = 8
-MAX_WORD_REPEAT_RATIO = 0.7
+MAX_MESSAGE_LENGTH = 1500
 
 
 @dataclass
 class ValidationResult:
-    cleaned_text: str
     is_valid: bool
-    warnings: list[str]
+    cleaned_text: str
     error: str | None = None
+    warning: str | None = None
 
 
-def normalize_message_text(text: str) -> str:
-    """
-    Basic normalization:
-    - strip outer spaces
-    - collapse repeated whitespace/newlines into single spaces
-    """
-    return " ".join(text.strip().split())
+def normalize_text(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
 
 
-def has_excessive_repeated_characters(text: str) -> bool:
-    """
-    Detect cases like:
-    'heyyyyyyyyyyyy'
-    'aaaaaaa'
-    '!!!!!'
-    """
-    return re.search(r"(.)\1{" + str(MAX_REPEATED_CHAR_RUN - 1) + r",}", text) is not None
+def is_spam_like(text: str) -> bool:
+    stripped = text.strip()
+
+    if len(stripped) < 2:
+        return True
+
+    if len(set(stripped.lower())) == 1 and len(stripped) > 6:
+        return True
+
+    if stripped.count("http") > 3:
+        return True
+
+    return False
 
 
-def has_too_little_meaningful_content(text: str) -> bool:
-    """
-    Reject empty or almost empty content after cleanup.
-    """
-    return len(text.strip()) < MIN_MEANINGFUL_LENGTH
+def is_repeated_message(text: str, recent_user_messages: list[str]) -> bool:
+    cleaned = normalize_text(text).lower()
+    recent_cleaned = [normalize_text(item).lower() for item in recent_user_messages[-3:]]
+
+    return cleaned in recent_cleaned
 
 
-def has_high_word_repetition(text: str) -> bool:
-    """
-    Detect spammy repeated word patterns like:
-    'help help help help help'
-    """
-    words = re.findall(r"\w+", text.lower())
-    if not words:
-        return False
+def validate_user_message(text: str, recent_user_messages: list[str]) -> ValidationResult:
+    cleaned = normalize_text(text)
 
-    unique_words = set(words)
-    most_common_count = max(words.count(word) for word in unique_words)
-    repeat_ratio = most_common_count / len(words)
-
-    return repeat_ratio >= MAX_WORD_REPEAT_RATIO and len(words) >= 4
-
-
-def is_nearly_same_message(current_text: str, previous_text: str) -> bool:
-    """
-    Very simple duplicate detection based on normalized exact match.
-    """
-    return normalize_message_text(current_text).lower() == normalize_message_text(previous_text).lower()
-
-
-def validate_user_message(
-    text: str,
-    recent_user_messages: list[str] | None = None,
-) -> ValidationResult:
-    recent_user_messages = recent_user_messages or []
-    warnings: list[str] = []
-
-    cleaned = normalize_message_text(text)
-
-    if has_too_little_meaningful_content(cleaned):
+    if not cleaned:
         return ValidationResult(
-            cleaned_text=cleaned,
             is_valid=False,
-            warnings=[],
-            error="Message is too short or empty.",
+            cleaned_text="",
+            error="Message is empty.",
         )
 
     if len(cleaned) > MAX_MESSAGE_LENGTH:
         return ValidationResult(
-            cleaned_text=cleaned,
             is_valid=False,
-            warnings=[],
+            cleaned_text="",
             error=f"Message is too long. Maximum length is {MAX_MESSAGE_LENGTH} characters.",
         )
 
-    if has_excessive_repeated_characters(cleaned):
+    if is_spam_like(cleaned):
         return ValidationResult(
-            cleaned_text=cleaned,
             is_valid=False,
-            warnings=[],
-            error="Message looks like spam or contains too many repeated characters.",
+            cleaned_text="",
+            error="Message looks invalid or spam-like.",
         )
 
-    if has_high_word_repetition(cleaned):
+    if is_repeated_message(cleaned, recent_user_messages):
         return ValidationResult(
-            cleaned_text=cleaned,
             is_valid=False,
-            warnings=[],
-            error="Message looks repetitive and may be spam.",
+            cleaned_text="",
+            error="Please avoid sending the exact same message repeatedly.",
         )
-
-    if recent_user_messages:
-        last_message = recent_user_messages[-1]
-        if is_nearly_same_message(cleaned, last_message):
-            warnings.append("This message is very similar to the previous one.")
 
     return ValidationResult(
-        cleaned_text=cleaned,
         is_valid=True,
-        warnings=warnings,
-        error=None,
+        cleaned_text=cleaned,
     )

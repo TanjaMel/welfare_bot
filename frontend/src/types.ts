@@ -3,12 +3,35 @@ export type User = {
   first_name: string;
   last_name: string | null;
   phone_number: string;
+  email?: string | null;
+  role?: string;
   language: string;
   timezone?: string | null;
   notes?: string | null;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
+};
+
+export type UserLogin = {
+  email: string;
+  password: string;
+};
+
+export type UserRegister = {
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  language: string;
+  email: string;
+  password: string;
+  role?: string;
+};
+
+export type TokenResponse = {
+  access_token: string;
+  token_type: string;
+  user: User;
 };
 
 export type CreateUserRequest = {
@@ -30,11 +53,10 @@ export type ConversationMessage = {
   created_at: string;
 };
 
-// Matches backend RiskAnalysisResponse exactly
 export type RiskAnalysis = {
   id: number;
   user_id: number;
-  daily_checkin_id?: number | null;       // backend field name
+  daily_checkin_id?: number | null;
   conversation_message_id?: number | null;
   category: string;
   risk_level: string;
@@ -44,7 +66,8 @@ export type RiskAnalysis = {
   follow_up_question?: string | null;
   signals_json?: string[];
   reasons_json?: string[];
-  should_alert_family?: boolean;          // backend field name
+  needs_family_notification?: boolean;
+  should_alert_family?: boolean;
   model_version?: string | null;
   created_at?: string;
 };

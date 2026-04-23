@@ -19,7 +19,7 @@ class ConversationSession(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    user = relationship("User", back_populates="conversation_sessions")
+   
 
     messages = relationship(
         "ConversationMessage",

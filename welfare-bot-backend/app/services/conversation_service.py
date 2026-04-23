@@ -1,201 +1,359 @@
-import json
+from __future__ import annotations
 
+from typing import Any
+
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models.conversation_message import ConversationMessage
-from app.db.models.conversation_session import ConversationSession
+from app.db.models.notification import Notification
+from app.db.models.risk_analysis import RiskAnalysis
 from app.db.models.user import User
-from app.integrations.openai_client import client
-from app.schemas.conversation import (
-    ConversationMessageRead,
-    ConversationMessageRequest,
-    ConversationMessageResponse,
-    ConversationSummary,
-)
+from app.services.memory_service import refresh_user_memory_summary
+from app.services.notification_service import create_notification_for_risk
+from app.services.risk_analysis_service import analyze_chat_message
+from app.services.token_service import trim_input_items_to_token_budget
+from app.services.validation_service import validate_user_message
+
 
 settings = get_settings()
-
-SYSTEM_PROMPT = """
-You are a warm, calm, safe AI wellbeing assistant for elderly users.
-You speak clearly and simply.
-You never claim to be human.
-You do not diagnose illnesses.
-You ask at most one follow-up question at a time.
-You answer in Finnish unless the user profile clearly suggests another language.
-
-Return JSON with this exact shape:
-{
-  "assistant_message": "string",
-  "summary": {
-    "mood": "string or null",
-    "concern_level": "low | medium | high | null",
-    "suggested_next_action": "string or null"
-  },
-  "risk_flags": ["string"]
-}
-"""
+client = OpenAI(api_key=settings.openai_api_key)
 
 
-def _get_or_create_active_session(db: Session, user_id: int) -> ConversationSession:
-    session = (
-        db.query(ConversationSession)
-        .filter(
-            ConversationSession.user_id == user_id,
-            ConversationSession.status == "active",
-            ConversationSession.channel == "chat",
-        )
-        .order_by(ConversationSession.id.desc())
-        .first()
-    )
-
-    if session:
-        return session
-
-    session = ConversationSession(
-        user_id=user_id,
-        channel="chat",
-        status="active",
-    )
-    db.add(session)
-    db.flush()
-    return session
+SUPPORTED_LANGUAGES = {"en", "fi", "sv"}
 
 
-def _call_openai(user: User, message: str) -> tuple[str, ConversationSummary, list[str]]:
-    user_context = {
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "language": user.language,
-        "is_active": user.is_active,
-    }
+def resolve_language(user: User, payload_language: str | None, text: str) -> str:
+    if payload_language and payload_language in SUPPORTED_LANGUAGES:
+        return payload_language
 
-    prompt = f"""
-User profile:
-{json.dumps(user_context, ensure_ascii=False)}
+    if user.language and user.language in SUPPORTED_LANGUAGES:
+        return user.language
 
-User message:
-{message}
+    text_lower = f" {text.lower()} "
 
-Respond only with valid JSON.
-"""
+    if any(word in text_lower for word in [" minä ", " olen ", " huimaa ", " yksinäinen ", " rintakipu "]):
+        return "fi"
+    if any(word in text_lower for word in [" jag ", " trött ", " ensam ", " bröstsmärta "]):
+        return "sv"
 
-    response = client.responses.create(
-        model=settings.openai_model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    text_output = getattr(response, "output_text", None)
-    if not text_output:
-        raise ValueError("OpenAI response was empty")
-
-    try:
-        parsed = json.loads(text_output)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON returned by OpenAI: {text_output}") from exc
-
-    summary_data = parsed.get("summary", {})
-    summary = ConversationSummary(
-        mood=summary_data.get("mood"),
-        concern_level=summary_data.get("concern_level"),
-        suggested_next_action=summary_data.get("suggested_next_action"),
-    )
-    risk_flags = parsed.get("risk_flags", [])
-
-    return parsed["assistant_message"], summary, risk_flags
+    return "en"
 
 
-def create_conversation_message(
-    db: Session,
-    payload: ConversationMessageRequest,
-) -> ConversationMessageResponse:
-    user = db.query(User).filter(User.id == payload.user_id).first()
-    if user is None:
-        raise ValueError("User not found")
-
-    session = _get_or_create_active_session(db, payload.user_id)
-
-    user_message = ConversationMessage(
-        session_id=session.id,
-        user_id=payload.user_id,
-        role="user",
-        message_text=payload.message,
-        message_type="text",
-        source="app",
-    )
-    db.add(user_message)
-    db.flush()
-
-    assistant_message_text, summary, risk_flags = _call_openai(user, payload.message)
-
-    assistant_message = ConversationMessage(
-        session_id=session.id,
-        user_id=payload.user_id,
-        role="assistant",
-        message_text=assistant_message_text,
-        message_type="text",
-        source="app",
-        mood=summary.mood,
-        concern_level=summary.concern_level,
-        suggested_next_action=summary.suggested_next_action,
-        risk_flags_json=json.dumps(risk_flags, ensure_ascii=False),
-    )
-    db.add(assistant_message)
-
-    db.commit()
-    db.refresh(user_message)
-    db.refresh(assistant_message)
-    db.refresh(session)
-
-    return ConversationMessageResponse(
-        assistant_message=assistant_message_text,
-        summary=summary,
-        risk_flags=risk_flags,
-        session_id=session.id,
-        user_message_id=user_message.id,
-        assistant_message_id=assistant_message.id,
-    )
+def language_label(code: str) -> str:
+    if code == "fi":
+        return "Finnish"
+    if code == "sv":
+        return "Swedish"
+    return "English"
 
 
-def list_conversation_messages(db: Session, user_id: int) -> list[ConversationMessageRead]:
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise ValueError("User not found")
-
+def get_recent_user_messages(db: Session, user_id: int, limit: int = 5) -> list[str]:
     messages = (
         db.query(ConversationMessage)
-        .filter(ConversationMessage.user_id == user_id)
-        .order_by(ConversationMessage.id.asc())
+        .filter(
+            ConversationMessage.user_id == user_id,
+            ConversationMessage.role == "user",
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit)
         .all()
     )
 
-    result: list[ConversationMessageRead] = []
-    for msg in messages:
-        risk_flags: list[str] = []
-        if msg.risk_flags_json:
-            try:
-                risk_flags = json.loads(msg.risk_flags_json)
-            except json.JSONDecodeError:
-                risk_flags = []
+    return list(reversed([m.content for m in messages]))
 
-        result.append(
-            ConversationMessageRead(
-                id=msg.id,
-                session_id=msg.session_id,
-                user_id=msg.user_id,
-                role=msg.role,
-                message_text=msg.message_text,
-                message_type=msg.message_type,
-                source=msg.source,
-                mood=msg.mood,
-                concern_level=msg.concern_level,
-                suggested_next_action=msg.suggested_next_action,
-                risk_flags=risk_flags,
-                created_at=msg.created_at,
+
+def build_input_items(
+    *,
+    db: Session,
+    user: User,
+    language: str,
+    risk_analysis: dict[str, Any],
+) -> list[dict[str, str]]:
+    messages = (
+        db.query(ConversationMessage)
+        .filter(ConversationMessage.user_id == user.id)
+        .order_by(ConversationMessage.created_at.asc())
+        .all()
+    )
+
+    target_language = language_label(language)
+
+    developer_prompt = f"""
+You are a supportive welfare assistant for older adults.
+
+LANGUAGE RULES:
+- You MUST reply ONLY in {target_language}.
+- Never mix languages.
+- Never add translations.
+- Never switch language mid-response.
+
+ROLE:
+- Calm, human, warm, practical.
+- Short and clear.
+- Do not diagnose.
+
+RISK CONTEXT:
+- risk_level: {risk_analysis["risk_level"]}
+- category: {risk_analysis["category"]}
+- signals: {", ".join(risk_analysis["signals_json"]) if risk_analysis["signals_json"] else "none"}
+- follow_up_question: {risk_analysis["follow_up_question"]}
+- suggested_action: {risk_analysis["suggested_action"]}
+- should_alert_family: {risk_analysis["should_alert_family"]}
+
+RULES:
+- LOW: supportive and simple
+- MEDIUM: mention wellbeing impact and ask one follow-up question
+- HIGH: stronger concern and one safety-oriented follow-up
+- CRITICAL: recommend urgent help now
+
+OUTPUT:
+- plain text only
+- no bullet points
+- no headings
+- no translations
+""".strip()
+
+    items: list[dict[str, str]] = [
+        {
+            "role": "developer",
+            "content": developer_prompt,
+        }
+    ]
+
+    if user.memory_summary:
+        items.append(
+            {
+                "role": "developer",
+                "content": f"Long-term memory summary:\n{user.memory_summary}",
+            }
+        )
+
+    for msg in messages:
+        if msg.role in {"user", "assistant"}:
+            items.append(
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                }
+            )
+
+    return trim_input_items_to_token_budget(
+        items=items,
+        model_name=settings.openai_model,
+        max_input_tokens=6000,
+    )
+
+
+def should_stream_reply(risk_level: str) -> bool:
+    return risk_level in {"low", "medium"}
+
+
+def generate_non_stream_reply(
+    *,
+    db: Session,
+    user: User,
+    language: str,
+    risk_analysis: dict[str, Any],
+) -> str:
+    response = client.responses.create(
+        model=settings.openai_model,
+        input=build_input_items(
+            db=db,
+            user=user,
+            language=language,
+            risk_analysis=risk_analysis,
+        ),
+    )
+
+    return response.output_text or "Sorry, I could not generate a reply."
+
+
+def save_user_message(
+    *,
+    db: Session,
+    user_id: int,
+    text: str,
+) -> ConversationMessage:
+    message = ConversationMessage(
+        user_id=user_id,
+        role="user",
+        content=text,
+        message_type="free_chat",
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return message
+
+
+def save_assistant_message(
+    *,
+    db: Session,
+    user_id: int,
+    text: str,
+) -> ConversationMessage:
+    message = ConversationMessage(
+        user_id=user_id,
+        role="assistant",
+        content=text,
+        message_type="free_chat",
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    return message
+
+
+def save_risk_analysis_for_message(
+    *,
+    db: Session,
+    user_id: int,
+    conversation_message_id: int,
+    risk_result: dict[str, Any],
+) -> RiskAnalysis:
+    risk_analysis = RiskAnalysis(
+        user_id=user_id,
+        conversation_message_id=conversation_message_id,
+        category=risk_result["category"],
+        risk_level=risk_result["risk_level"],
+        risk_score=risk_result["risk_score"],
+        reason=risk_result["reason"],
+        suggested_action=risk_result["suggested_action"],
+        follow_up_question=risk_result["follow_up_question"],
+        signals_json=risk_result["signals_json"],
+        reasons_json=risk_result["reasons_json"],
+        should_alert_family=risk_result["should_alert_family"],
+        model_version=risk_result["model_version"],
+    )
+    db.add(risk_analysis)
+    db.commit()
+    db.refresh(risk_analysis)
+    return risk_analysis
+
+
+def update_message_risk_fields(
+    *,
+    db: Session,
+    message: ConversationMessage,
+    risk_analysis: RiskAnalysis,
+) -> None:
+    message.risk_level = risk_analysis.risk_level
+    message.risk_score = risk_analysis.risk_score
+    message.risk_category = risk_analysis.category
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+
+def maybe_create_notifications(
+    *,
+    db: Session,
+    risk_analysis: RiskAnalysis,
+) -> list[Notification]:
+    notifications: list[Notification] = []
+
+    if risk_analysis.should_alert_family or risk_analysis.risk_level in {"high", "critical"}:
+        notifications.append(
+            create_notification_for_risk(
+                db,
+                risk_analysis=risk_analysis,
             )
         )
 
-    return result
+    return notifications
+
+
+def handle_message(
+    *,
+    db: Session,
+    user: User,
+    raw_text: str,
+    payload_language: str | None = None,
+) -> dict[str, Any]:
+    recent_user_messages = get_recent_user_messages(db, user.id)
+
+    validation = validate_user_message(
+        text=raw_text,
+        recent_user_messages=recent_user_messages,
+    )
+
+    if not validation.is_valid:
+        raise ValueError(validation.error or "Invalid message")
+
+    cleaned_text = validation.cleaned_text
+    language = resolve_language(user, payload_language, cleaned_text)
+
+    user_message = save_user_message(
+        db=db,
+        user_id=user.id,
+        text=cleaned_text,
+    )
+
+    risk_result = analyze_chat_message(
+        user_id=user.id,
+        message=cleaned_text,
+        language=language,
+    )
+
+    risk_analysis = save_risk_analysis_for_message(
+        db=db,
+        user_id=user.id,
+        conversation_message_id=user_message.id,
+        risk_result=risk_result,
+    )
+
+    update_message_risk_fields(
+        db=db,
+        message=user_message,
+        risk_analysis=risk_analysis,
+    )
+
+    notifications = maybe_create_notifications(
+        db=db,
+        risk_analysis=risk_analysis,
+    )
+
+    reply = generate_non_stream_reply(
+        db=db,
+        user=user,
+        language=language,
+        risk_analysis=risk_result,
+    )
+
+    assistant_message = save_assistant_message(
+        db=db,
+        user_id=user.id,
+        text=reply,
+    )
+
+    refresh_user_memory_summary(db=db, user=user)
+
+    return {
+        "reply": assistant_message.content,
+        "risk_analysis": {
+            "id": risk_analysis.id,
+            "user_id": risk_analysis.user_id,
+            "category": risk_analysis.category,
+            "risk_level": risk_analysis.risk_level,
+            "risk_score": risk_analysis.risk_score,
+            "reason": risk_analysis.reason,
+            "suggested_action": risk_analysis.suggested_action,
+            "follow_up_question": risk_analysis.follow_up_question,
+            "should_alert_family": risk_analysis.should_alert_family,
+            "signals_json": risk_analysis.signals_json,
+            "reasons_json": risk_analysis.reasons_json,
+            "model_version": risk_analysis.model_version,
+        },
+        "notifications": [
+            {
+                "id": n.id,
+                "channel": n.channel,
+                "message": n.message,
+                "status": n.status,
+            }
+            for n in notifications
+        ],
+        "mode": "non_stream",
+    }
