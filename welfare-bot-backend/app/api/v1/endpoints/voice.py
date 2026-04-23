@@ -4,7 +4,7 @@ import io
 import os
 import tempfile
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -37,9 +37,8 @@ def speak(payload: SpeakRequest):
             input=text,
             response_format="mp3",
         )
-        audio_bytes = response.content
         return StreamingResponse(
-            io.BytesIO(audio_bytes),
+            io.BytesIO(response.content),
             media_type="audio/mpeg",
             headers={"Content-Disposition": "inline; filename=speech.mp3"},
         )
@@ -48,31 +47,18 @@ def speak(payload: SpeakRequest):
 
 
 @router.post("/transcribe", response_model=TranscribeResponse, summary="Speech to text")
-async def transcribe(request: Request):
-    try:
-        form = await request.form()
-    except Exception:
-        raise HTTPException(status_code=422, detail="Could not parse form data")
-
-    audio_file = form.get("audio")
-    language = str(form.get("language", "fi"))
-
-    if audio_file is None:
-        raise HTTPException(status_code=422, detail="No audio field in form")
-
-    try:
-        audio_bytes = await audio_file.read()
-    except Exception:
-        raise HTTPException(status_code=422, detail="Could not read audio file")
+async def transcribe(
+    audio: UploadFile = File(...),
+    language: str = Form(default="fi"),
+):
+    audio_bytes = await audio.read()
 
     if len(audio_bytes) == 0:
-        raise HTTPException(status_code=422, detail="Audio file is empty")
+        raise HTTPException(status_code=400, detail="Audio file is empty")
 
-    # Determine file extension
-    filename = getattr(audio_file, "filename", "") or ""
-    ext = os.path.splitext(filename)[1] if filename else ".webm"
-    if not ext:
-        ext = ".webm"
+    # Pick file extension
+    filename = audio.filename or "recording.webm"
+    ext = os.path.splitext(filename)[1] or ".webm"
 
     try:
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
