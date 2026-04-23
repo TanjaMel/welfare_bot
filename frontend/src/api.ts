@@ -121,10 +121,9 @@ export function logout(): void {
 }
 export async function startConversation(
   userId: number,
-  language: string = "fi",
 ): Promise<ConversationMessage> {
   const response = await fetch(
-    `${API_BASE}/conversations/start?user_id=${userId}&language=${language}`,
+    `${API_BASE}/conversations/start?user_id=${userId}&language=fi`,
     {
       method: "POST",
       headers: authHeaders(),

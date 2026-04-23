@@ -21,7 +21,6 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
     !!localStorage.getItem("access_token")
   );
-  const [selectedLanguage, setSelectedLanguage] = useState<string>("fi");
   const [users, setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("Loading...");
@@ -56,7 +55,6 @@ export default function App() {
     setUserId(user.id);
     setUserName([user.first_name, user.last_name].filter(Boolean).join(" "));
     setUserLanguage(user.language || "fi");
-    setSelectedLanguage(user.language || "fi");
     storeUserId(user.id);
   }
 
@@ -96,14 +94,12 @@ export default function App() {
 
       const id = currentUser.id;
 
-      // Load risk analysis
       const [, riskResult] = await Promise.allSettled([
         Promise.resolve(),
         loadRiskAnalysis(id),
       ]);
       if (riskResult.status === "rejected") setRiskAnalyses([]);
 
-      // Load messages and start conversation if needed
       try {
         const allMessages = await getMessages(id);
         const todayMessages = allMessages.filter((m) =>
@@ -111,9 +107,7 @@ export default function App() {
         );
 
         if (todayMessages.length === 0) {
-          // No messages today — bot sends opening greeting
-          await startConversation(id, currentUser.language || "fi");
-          // Reload from DB to get correct IDs
+          await startConversation(id);
           const refreshed = await getMessages(id);
           setMessages(refreshed);
         } else {
@@ -156,7 +150,7 @@ export default function App() {
       };
       setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
       await sendMessageStream(
-        { user_id: userId, message: trimmed, language: selectedLanguage },
+        { user_id: userId, message: trimmed, language: "auto" },
         (chunk) => {
           setMessages((prev) =>
             prev.map((msg) =>
@@ -167,7 +161,6 @@ export default function App() {
           );
         },
       );
-      // Reload messages and risk after send
       const [refreshed, riskData] = await Promise.allSettled([
         getMessages(userId),
         getUserRiskAnalysis(userId),
@@ -270,21 +263,6 @@ export default function App() {
         )}
 
         <div className="sidebar-card">
-          <label className="field-label" htmlFor="language-select">Reply language</label>
-          <select
-            id="language-select"
-            className="user-select"
-            value={selectedLanguage}
-            onChange={(e) => setSelectedLanguage(e.target.value)}
-            disabled={loading || bootstrapping}
-          >
-            <option value="en">English</option>
-            <option value="fi">Finnish</option>
-            <option value="sv">Swedish</option>
-          </select>
-        </div>
-
-        <div className="sidebar-card">
           <div className="card-title">Risk status</div>
           {latestRisk ? (
             <>
@@ -344,7 +322,7 @@ export default function App() {
           onSend={handleSend}
           loading={loading || bootstrapping}
           error={error}
-          language={selectedLanguage}
+          language="auto"
         />
       </main>
     </div>

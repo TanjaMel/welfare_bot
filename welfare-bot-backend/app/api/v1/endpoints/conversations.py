@@ -172,11 +172,11 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
 
     # 3. Risk assessment
     result = risk_service.assess(
-        current_message=payload.message,
-        recent_user_messages=recent_texts,
-        preferred_language=payload.language,
-        elderly=True,
-    )
+    current_message=payload.message,
+    recent_user_messages=recent_texts,
+    preferred_language=None,
+    elderly=True,
+)
 
     # 4. Update user message risk fields
     user_msg.risk_level = result["risk_level"]
