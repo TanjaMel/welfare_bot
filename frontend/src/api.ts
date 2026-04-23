@@ -131,4 +131,51 @@ export async function startConversation(
   );
   return handleResponse<ConversationMessage>(response);
 }
+export interface CareContact {
+  id: number;
+  user_id: number;
+  name: string;
+  relationship_type: string;
+  phone_number?: string;
+  email?: string;
+  preferred_notification_method: string;
+  is_primary: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export interface CareContactCreate {
+  user_id: number;
+  name: string;
+  relationship_type: string;
+  phone_number?: string;
+  email?: string;
+  preferred_notification_method?: string;
+  is_primary?: boolean;
+  notes?: string;
+}
+
+export async function getCareContacts(userId: number): Promise<CareContact[]> {
+  const response = await fetch(`${API_BASE}/care-contacts/user/${userId}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<CareContact[]>(response);
+}
+
+export async function createCareContact(payload: CareContactCreate): Promise<CareContact> {
+  const response = await fetch(`${API_BASE}/care-contacts/`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<CareContact>(response);
+}
+
+export async function deleteCareContact(id: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/care-contacts/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  return handleResponse<void>(response);
+}
 export type { User, RiskAnalysis };
