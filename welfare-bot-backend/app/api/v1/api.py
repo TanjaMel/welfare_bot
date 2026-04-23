@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     conversations,
     risk_analysis,
     notifications,
+    voice,
 )
 
 api_router = APIRouter()
@@ -18,3 +19,4 @@ api_router.include_router(checkins.router,      prefix="/checkins",      tags=["
 api_router.include_router(conversations.router, prefix="/conversations",  tags=["conversations"])
 api_router.include_router(risk_analysis.router, prefix="/risk-analysis",  tags=["risk-analysis"])
 api_router.include_router(notifications.router, prefix="/notifications",  tags=["notifications"])
+api_router.include_router(voice.router,         prefix="/voice",         tags=["voice"])
