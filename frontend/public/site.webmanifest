@@ -1,6 +1,6 @@
 {
   "name": "Welfare Bot",
-  "short_name": "Welfare Bot",
+  "short_name": "WelfareBot",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
@@ -15,5 +15,6 @@
   ],
   "theme_color": "#4F7DF3",
   "background_color": "#F6F8FB",
-  "display": "standalone"
+  "display": "standalone",
+  "start_url": "/"
 }
