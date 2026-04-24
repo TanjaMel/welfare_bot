@@ -1,8 +1,9 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import os
 
 from app.api.v1.api import api_router
 from app.db.base import Base
@@ -26,35 +27,92 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api/v1")
 
-# Serve React frontend — check multiple possible static paths
+
+# Serve React frontend
 POSSIBLE_STATIC_DIRS = [
-    os.path.join(os.path.dirname(__file__), "static"),  # local: app/static
-    "/app/static",                                        # Railway absolute path
-    os.path.join(os.getcwd(), "static"),                 # cwd/static
+    Path(__file__).resolve().parent / "static",  # app/static
+    Path("/app/static"),                         # Railway absolute path
+    Path.cwd() / "static",                       # cwd/static
 ]
 
-static_dir = None
+static_dir: Path | None = None
+
 for path in POSSIBLE_STATIC_DIRS:
-    if os.path.exists(path) and os.path.exists(os.path.join(path, "index.html")):
+    if path.exists() and (path / "index.html").exists():
         static_dir = path
         break
 
+
 if static_dir:
-    app.mount("/assets", StaticFiles(directory=f"{static_dir}/assets"), name="assets")
+    assets_dir = static_dir / "assets"
 
-    @app.get("/")
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/", include_in_schema=False)
     def serve_frontend():
-        return FileResponse(f"{static_dir}/index.html")
+        return FileResponse(static_dir / "index.html")
 
-    @app.get("/{full_path:path}")
+    @app.get("/site.webmanifest", include_in_schema=False)
+    def serve_manifest():
+        return FileResponse(
+            static_dir / "site.webmanifest",
+            media_type="application/manifest+json",
+        )
+
+    @app.get("/logo.png", include_in_schema=False)
+    def serve_logo():
+        return FileResponse(static_dir / "logo.png")
+
+    @app.get("/icon.png", include_in_schema=False)
+    def serve_icon():
+        icon_path = static_dir / "icon.png"
+        if icon_path.exists():
+            return FileResponse(icon_path)
+
+        # fallback if you use logo.png as UI logo
+        return FileResponse(static_dir / "logo.png")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def serve_favicon_ico():
+        return FileResponse(static_dir / "favicon.ico")
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    def serve_favicon_svg():
+        return FileResponse(static_dir / "favicon.svg")
+
+    @app.get("/favicon-16x16.png", include_in_schema=False)
+    def serve_favicon_16():
+        return FileResponse(static_dir / "favicon-16x16.png")
+
+    @app.get("/favicon-32x32.png", include_in_schema=False)
+    def serve_favicon_32():
+        return FileResponse(static_dir / "favicon-32x32.png")
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    def serve_apple_touch_icon():
+        return FileResponse(static_dir / "apple-touch-icon.png")
+
+    @app.get("/android-chrome-192x192.png", include_in_schema=False)
+    def serve_android_192():
+        return FileResponse(static_dir / "android-chrome-192x192.png")
+
+    @app.get("/android-chrome-512x512.png", include_in_schema=False)
+    def serve_android_512():
+        return FileResponse(static_dir / "android-chrome-512x512.png")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
     def serve_frontend_routes(full_path: str):
         if full_path.startswith("api/"):
-            return {"detail": "Not found"}
-        index_path = f"{static_dir}/index.html"
-        return FileResponse(index_path)
+            return JSONResponse({"detail": "Not found"}, status_code=404)
+
+        return FileResponse(static_dir / "index.html")
+
 else:
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     def root():
-        # Debug: show what paths were checked
-        checked = {p: os.path.exists(p) for p in POSSIBLE_STATIC_DIRS}
-        return {"message": "Welfare Bot backend is running", "static_checked": checked}
+        checked = {str(path): path.exists() for path in POSSIBLE_STATIC_DIRS}
+        return {
+            "message": "Welfare Bot backend is running",
+            "static_checked": checked,
+        }
