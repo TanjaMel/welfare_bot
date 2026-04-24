@@ -27,13 +27,10 @@ type WellbeingInfo = {
 
 function AppLogo({ small = false }: { small?: boolean }) {
   return (
-    <img
-      className={`brand-logo-img ${small ? "small" : ""}`}
-      src="/icon.png"
-      alt="Welfare Bot"
-    />
+    <img src="/logo.png" alt="Welfare Bot" className="brand-logo-img" />
   );
 }
+
 
 function getWellbeingInfo(riskLevel: string | undefined): WellbeingInfo {
   if (!riskLevel) {

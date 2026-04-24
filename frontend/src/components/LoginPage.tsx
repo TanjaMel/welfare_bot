@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { login, register } from "../api";
+import type { UserRegister } from "../types";
 
 interface Props {
   onSuccess: () => void;
@@ -10,7 +11,10 @@ export default function LoginPage({ onSuccess }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [phone, setPhone] = useState("");
   const [language, setLanguage] = useState("fi");
+  const [role, setRole] = useState("user");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -23,15 +27,16 @@ export default function LoginPage({ onSuccess }: Props) {
         localStorage.setItem("access_token", result.access_token);
         localStorage.setItem("current_user", JSON.stringify(result.user));
       } else {
-        const result = await register({
+        const payload: UserRegister = {
           first_name: firstName,
-          last_name: "",
-          phone_number: `user_${Date.now()}`,  // placeholder, required by DB
+          last_name: lastName,
+          phone_number: phone,
           language,
           email,
           password,
-          role: "user",
-        });
+          role,
+        };
+        const result = await register(payload);
         localStorage.setItem("access_token", result.access_token);
         localStorage.setItem("current_user", JSON.stringify(result.user));
       }
@@ -46,7 +51,10 @@ export default function LoginPage({ onSuccess }: Props) {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>🤝 Welfare Bot</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", marginBottom: "8px" }}>
+          <img src="/logo.png" alt="Welfare Bot" style={{ width: "40px", height: "40px", objectFit: "contain" }} />
+          <h1 style={{ fontSize: "24px", fontWeight: "800", color: "#0D2152" }}>Welfare Bot</h1>
+        </div>
         <p style={styles.subtitle}>
           {mode === "login" ? "Sign in to your account" : "Create a new account"}
         </p>
@@ -55,54 +63,31 @@ export default function LoginPage({ onSuccess }: Props) {
 
         {mode === "register" && (
           <>
-            <input
-              style={styles.input}
-              placeholder="Your first name"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-            />
-            <select
-              style={styles.input}
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            >
+            <input style={styles.input} placeholder="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            <input style={styles.input} placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            <input style={styles.input} placeholder="Phone number (e.g. +358401234567)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <select style={styles.input} value={language} onChange={(e) => setLanguage(e.target.value)}>
               <option value="fi">Finnish</option>
               <option value="en">English</option>
               <option value="sv">Swedish</option>
             </select>
+            <select style={styles.input} value={role} onChange={(e) => setRole(e.target.value)}>
+              <option value="user">User (elderly person)</option>
+              <option value="admin">Admin (care worker)</option>
+            </select>
           </>
         )}
 
-        <input
-          style={styles.input}
-          placeholder="Email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <input
-          style={styles.input}
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void handleSubmit()}
-        />
+        <input style={styles.input} placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input style={styles.input} placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void handleSubmit()} />
 
-        <button
-          style={styles.button}
-          onClick={() => void handleSubmit()}
-          disabled={loading}
-        >
+        <button style={styles.button} onClick={() => void handleSubmit()} disabled={loading}>
           {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
         </button>
 
         <p style={styles.toggle}>
           {mode === "login" ? "Don't have an account? " : "Already have an account? "}
-          <span
-            style={styles.link}
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}
-          >
+          <span style={styles.link} onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}>
             {mode === "login" ? "Register" : "Sign in"}
           </span>
         </p>
