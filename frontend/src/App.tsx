@@ -16,6 +16,7 @@ import ChatWindow from "./components/ChatWindow";
 import LoginPage from "./components/LoginPage";
 import CareContactForm from "./components/CareContactForm";
 import WellbeingPanel from "./components/WellbeingPanel";
+import Logo from "./assets/logo.png";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
@@ -27,7 +28,7 @@ type WellbeingInfo = {
 function AppLogo({ small = false }: { small?: boolean }) {
   return (
     <img
-      src="/logo.png"
+      src="assets/logo.png"
       alt="Welfare Bot"
       className={`brand-logo-img ${small ? "small" : ""}`}
     />
@@ -300,7 +301,7 @@ export default function App() {
       <header className="top-app-bar">
         <div className="top-app-row">
           <div className="top-brand">
-            <AppLogo small />
+            <Logo />
             <div className="top-brand-copy">
               <span className="top-brand-name">Welfare Bot</span>
               <span className="top-brand-sub">Care. Support. Well-being.</span>
