@@ -1436,3 +1436,116 @@ body {
   .wb-bars { height: 120px; }
   .wb-bar-label { font-size: 9px; }
 }
+/* ─────────────────────────────────────────────
+   VIEW SWITCHER (TABS)
+───────────────────────────────────────────── */
+
+.view-switcher {
+  display: flex;
+  gap: 4px;
+  background: #EEF2FB;
+  border-radius: 14px;
+  padding: 4px;
+  margin-bottom: 20px;
+  width: fit-content;
+  flex-shrink: 0;
+}
+
+.view-tab {
+  padding: 10px 22px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.view-tab:hover {
+  color: var(--primary);
+  background: rgba(255,255,255,0.6);
+}
+
+.view-tab.active {
+  background: #FFFFFF;
+  color: var(--primary-dark);
+  box-shadow: 0 2px 8px rgba(79,125,243,0.12);
+}
+
+/* ─────────────────────────────────────────────
+   MOBILE LAYOUT FIX
+───────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .main-panel {
+    order: 1;
+    padding: 16px;
+  }
+
+  .sidebar {
+    order: 2;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    padding: 20px 16px;
+  }
+
+  .view-switcher {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .view-tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px 12px;
+  }
+
+  .chat-card {
+    min-height: 65vh;
+  }
+
+  .message-bubble {
+    max-width: 85%;
+  }
+}
+
+@media (max-width: 720px) {
+  .main-panel {
+    padding: 12px;
+  }
+
+  .sidebar {
+    padding: 16px 12px;
+    gap: 16px;
+  }
+
+  .chat-title {
+    font-size: 22px;
+  }
+
+  .chat-subtitle {
+    font-size: 13px;
+  }
+
+  .view-tab {
+    font-size: 13px;
+    padding: 9px 8px;
+  }
+
+  .message-bubble {
+    max-width: 88%;
+  }
+
+  .wb-panel {
+    padding: 16px;
+  }
+}
