@@ -1,0 +1,7 @@
+Set-Content -Path "D:\tatyana_prog\welfare-bot\frontend\railway.toml" -Value @"
+[build]
+buildCommand = "npm run build"
+
+[deploy]
+staticDir = "dist"
+"@
