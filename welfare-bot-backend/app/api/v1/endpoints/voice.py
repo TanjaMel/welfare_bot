@@ -56,9 +56,22 @@ async def transcribe(
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=400, detail="Audio file is empty")
 
-    # Pick file extension
     filename = audio.filename or "recording.webm"
     ext = os.path.splitext(filename)[1] or ".webm"
+
+    # Determine mime type from extension
+    mime_map = {
+        ".webm": "audio/webm",
+        ".ogg": "audio/ogg",
+        ".mp3": "audio/mpeg",
+        ".mp4": "audio/mp4",
+        ".wav": "audio/wav",
+        ".m4a": "audio/m4a",
+    }
+    mime_type = mime_map.get(ext.lower(), "audio/webm")
+
+    # Normalize language — default to fi if not supported
+    lang = language if language in ("fi", "en", "sv") else "fi"
 
     try:
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
@@ -69,12 +82,12 @@ async def transcribe(
             with open(tmp_path, "rb") as f:
                 transcript = client.audio.transcriptions.create(
                     model="whisper-1",
-                    file=f,
-                    language=language if language in ("fi", "en", "sv") else None,
+                    file=(filename, f, mime_type),
+                    language=lang,
                 )
             return TranscribeResponse(
                 text=transcript.text.strip(),
-                language=language,
+                language=lang,
             )
         finally:
             os.unlink(tmp_path)

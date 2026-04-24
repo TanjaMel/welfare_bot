@@ -1,234 +1,227 @@
-# Welfare Bot – AI-powered Wellbeing Assistant
+# Welfare Bot
 
-## Overview
+An AI-powered welfare assistant for elderly people — built to check in daily, detect risk signals, and notify care contacts when support is needed.
 
-Welfare Bot is a backend-driven AI system designed to support elderly wellbeing through conversational interaction, risk detection, and safety-aware response generation.
+## Live Demo
 
-The system analyzes user messages, detects potential wellbeing risks (such as loneliness, fatigue, or health-related signals), and produces structured risk assessments alongside safe, context-aware responses.
+[welfarebot-production.up.railway.app](https://welfarebot-production.up.railway.app)
+---
 
-The project focuses on combining:
+## The Problem
 
-* AI (LLM-based responses)
-* rule-based risk analysis
-* data validation
-* multilingual interaction
-* production-style backend architecture
+Elderly people living alone are at risk of silent deterioration — missed meals, poor sleep, falls, loneliness, and medical emergencies that go unnoticed for hours or days. Existing solutions are either too clinical, too expensive, or require family members to constantly check in manually.
+
+Welfare Bot solves this by having a warm, conversational AI check in with elderly users every day — in their own language, at their own pace — and quietly alerting care contacts when something is wrong.
 
 ---
 
-## Key Features
+## Business View
 
-### Risk-aware conversation pipeline
+**Who it is for:**
+- Elderly people living independently
+- Their adult children or family members
+- Care workers managing multiple clients
 
-Each message goes through a structured backend flow:
+**What it replaces:**
+- Daily phone calls from family members
+- Expensive in-home monitoring hardware
+- Generic reminder apps that feel cold and transactional
 
-1. Input validation (anti-spam, length, duplicates)
-2. Risk assessment (rule-based engine)
-3. Risk persistence (database)
-4. Context-aware response generation via LLM
-5. Safety validation of output
+**Revenue model (future):**
+- Monthly subscription per user (~€15–25/month)
+- B2B licensing to care agencies and municipalities
+- White-label for healthcare providers
 
----
-
-### Risk Engine (core logic)
-
-The system detects signals such as:
-
-* poor sleep
-* lack of food or water
-* fatigue
-* dizziness
-* loneliness
-* fall or physical pain
-
-Outputs:
-
-* risk level (low, medium, high, critical)
-* risk score
-* category
-* follow-up question
-* suggested action
-
-Important:
-
-* Risk is determined in backend, not by AI
-* AI only generates the response text
+**Why it works:**
+- Low friction — just a conversation, no new device needed
+- Multilingual — auto-detects Finnish, English, Swedish
+- Voice-first — elderly users can speak instead of type
+- Family-facing — care contacts get notified automatically on high risk
 
 ---
 
-### Memory Summary (context optimization)
+## What It Does
 
-The system maintains a compressed long-term summary of the user:
-
-* reduces token usage
-* improves contextual continuity
-* prevents prompt overflow
-
----
-
-### Token Optimization
-
-A token management layer:
-
-* trims conversation history
-* preserves important context
-* keeps requests within model limits
-
----
-
-### Multilingual Support
-
-Supported languages:
-
-* English
-* Finnish
-* Swedish
-
-Features:
-
-* automatic language detection
-* consistent single-language responses
-* no language mixing
-
----
-
-### Validation Layer
-
-All incoming messages are validated before processing:
-
-* maximum length control
-* anti-spam detection
-* repeated message detection
-
-This ensures higher data quality and more stable system behavior.
-
----
-
-### Safety-first Design
-
-* No medical diagnosis
-* Controlled escalation for critical cases
-* Risk-aware response logic
-* Output validation to prevent unsafe or mixed-language replies
+- Bot initiates a daily check-in conversation (morning, afternoon, evening)
+- Detects risk signals in natural language: sleep, food, hydration, pain, mood, loneliness, falls, chest pain
+- Assigns risk levels: low / medium / high / critical
+- Changes its behavior based on risk — more direct and safety-focused at high/critical
+- Limits conversations to 20 messages per day with a warm closing message
+- Auto-detects language — responds in whatever language the user writes or speaks
+- Voice interface — press once to start recording, press again to send
+- Bot reads its own responses aloud via TTS
+- Care contact form — store family member name, phone, email, notification preference
+- Wellbeing analytics panel — daily scores for mood, sleep, food, hydration, medication, social activity
+- Trend charts and human-readable insights over 7/14/30 days
+- All output uses soft, non-threatening language — never clinical terms
 
 ---
 
 ## Tech Stack
 
-Backend:
+**Backend**
+- Python 3.11 + FastAPI
+- PostgreSQL + SQLAlchemy ORM
+- Alembic migrations
+- OpenAI GPT-4o-mini (conversation)
+- OpenAI Whisper (speech-to-text)
+- OpenAI TTS nova (text-to-speech)
+- JWT authentication (PyJWT + bcrypt)
+- Deployed on Railway (Docker)
 
-* FastAPI
-* PostgreSQL
-* SQLAlchemy
-* Alembic
+**Frontend**
+- React 18 + TypeScript + Vite
+- Plain CSS (no UI library)
+- Voice recording via MediaRecorder API
+- Responsive — desktop sidebar + mobile drawer layout
 
-AI:
-
-* OpenAI API (LLM)
-
-Frontend:
-
-* React + TypeScript (Vite)
+**Database tables**
+- `users` — elderly users and admin/care worker accounts
+- `conversation_messages` — full chat history with risk fields
+- `risk_analyses` — per-message risk assessment
+- `care_contacts` — linked family/care worker contacts
+- `daily_checkins` — structured check-in answers
+- `notifications` — pending alert queue
+- `wellbeing_daily_metrics` — pre-aggregated daily wellbeing scores
 
 ---
 
 ## Architecture
 
-```text
-Frontend (React)
-        ↓
-FastAPI API Layer
-        ↓
-Service Layer
-  - risk_service
-  - validation_service
-  - memory_service
-  - token_service
-        ↓
-PostgreSQL
+```
+┌─────────────────────────────────────────┐
+│              Railway                    │
+│                                         │
+│  ┌──────────────┐   ┌────────────────┐  │
+│  │   FastAPI    │   │   PostgreSQL   │  │
+│  │   Backend    │──▶│   Database     │  │
+│  └──────┬───────┘   └────────────────┘  │
+│         │                               │
+│  ┌──────▼───────┐                       │
+│  │  React/TS    │                       │
+│  │  Frontend    │                       │
+│  │  (static)    │                       │
+│  └──────────────┘                       │
+└─────────────────────────────────────────┘
+         │
+         ▼
+   OpenAI API
+   (GPT-4o-mini + Whisper + TTS)
 ```
 
 ---
 
-## How this project demonstrates data and AI competencies
+## Risk Engine
 
-### Data processing
+Rule-based multilingual risk assessment. Runs on every message.
 
-* structured storage of conversations and risk events
-* relational data modeling
-* linking users, messages, and risk analysis
-
-### Data validation
-
-* input cleaning and normalization
-* spam detection
-* duplicate detection
-
-### AI usage
-
-* LLM integration for response generation
-* prompt engineering
-* controlled AI behavior (backend-driven logic)
-
-### Optimization
-
-* token trimming
-* memory summarization
-* context control
-
-### Evaluation
-
-* risk scoring system
-* test dataset and evaluation scripts
-* ability to measure consistency of outputs
-
-### Ethics and safety
-
-* AI does not make autonomous risk decisions
-* system avoids harmful outputs
-* critical cases are escalated safely
-* user wellbeing is prioritized
+| Level | Score | Signals | Bot behavior |
+|---|---|---|---|
+| Low | 0–3 | General wellbeing | Normal conversation |
+| Medium | 4–5 | Poor sleep, mild fatigue | Follow-up questions |
+| High | 6–7 | No food/water, fall, severe pain | Direct safety focus |
+| Critical | 8–10 | Chest pain, breathing difficulty | Immediate action prompt |
 
 ---
 
-## API Endpoints
+## Wellbeing Scoring
 
-Users:
+Daily aggregation pipeline computes one row per user per day from check-ins, messages, and risk analyses.
 
-* GET /users
-* POST /users
+| Component | Source | Weight |
+|---|---|---|
+| Mood | Check-in rating or risk signals | 25% |
+| Sleep | Sleep quality rating (1–5) | 25% |
+| Food | Meals eaten / tracked | 20% |
+| Hydration | Drank enough water (bool) | 15% |
+| Medication | Took medication (bool) | 10% |
+| Social | Message count today | 5% |
 
-Conversations:
-
-* GET /conversations/{user_id}/messages
-* POST /conversations/message
-* POST /conversations/message/stream
-
-Risk:
-
-* GET /conversations/{user_id}/risk-analysis
+Overall score blends check-in composite (70%) with risk signal (30%).
+Output is always soft language — never raw scores shown to the user.
 
 ---
 
-## Setup
+## Project Structure
 
-```bash
-cd welfare-bot-backend
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+```
+welfare-bot/
+├── Dockerfile
+├── railway.toml
+├── welfare-bot-backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── api/v1/endpoints/
+│   │   │   ├── auth.py
+│   │   │   ├── conversations.py
+│   │   │   ├── voice.py
+│   │   │   ├── care_contacts.py
+│   │   │   └── wellbeing.py
+│   │   ├── db/models/
+│   │   ├── services/
+│   │   │   ├── risk_service.py
+│   │   │   ├── aggregation_pipeline.py
+│   │   │   └── conversation_starter.py
+│   │   └── integrations/
+│   │       └── openai_client.py
+│   ├── alembic/
+│   └── requirements.txt
+└── frontend/
+    └── src/
+        ├── App.tsx
+        ├── index.css
+        ├── api.ts
+        ├── types.ts
+        └── components/
+            ├── ChatWindow.tsx
+            ├── LoginPage.tsx
+            ├── CareContactForm.tsx
+            ├── WellbeingPanel.tsx
+            ├── WellbeingScoreCard.tsx
+            ├── WellbeingTrendChart.tsx
+            └── WellbeingInsights.tsx
 ```
 
 ---
 
-## Recent Updates
+## Environment Variables (Railway)
 
-* Added token management layer (token_service)
-* Implemented memory summary system for context compression
-* Introduced validation layer (anti-spam, duplicate detection, max length)
-* Improved risk-aware prompt structure
-* Added multilingual response handling
-* Implemented safer response generation (stream vs non-stream based on risk)
+```
+DATABASE_URL        PostgreSQL connection string
+OPENAI_API_KEY      OpenAI API key
+SECRET_KEY          JWT signing secret (min 32 chars)
+```
 
 ---
+
+## Live Demo
+
+[welfarebot-production.up.railway.app](https://welfarebot-production.up.railway.app)
+
+**Test credentials:**
+- Register a new account with role `user`
+- Or use role `admin` to see all users
+
+**Demo phrases to test risk detection:**
+- Low (FI): `Nukuin hyvin, kiitos. Olo on hyvä tänään.`
+- Medium (FI): `En oikein jaksanut nukkua ja olen ollut vähän yksinäinen.`
+- High (FI): `En ole syönyt enkä juonut mitään tänään ja olen todella väsynyt.`
+- Critical (FI): `Minulla on kova rintakipu.`
+- English: `I haven't eaten or drunk anything today and I feel very weak.`
+- Swedish: `Jag mår inte bra idag.`
+
+---
+
+## Roadmap
+
+- [ ] Email notifications for HIGH risk (SendGrid/Gmail SMTP)
+- [ ] SMS notifications for CRITICAL risk (Twilio)
+- [ ] Phone call alerts for CRITICAL risk (Twilio Voice)
+- [ ] Weekly digest email to care contacts
+- [ ] Admin dashboard for care workers
+- [ ] Structured morning check-in with scored questions
+- [ ] Memory between sessions (conversation summary)
+- [ ] Medication reminders
+
+---
+
