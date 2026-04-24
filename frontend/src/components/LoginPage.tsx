@@ -52,7 +52,11 @@ export default function LoginPage({ onSuccess }: Props) {
     <div style={styles.container}>
       <div style={styles.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", marginBottom: "8px" }}>
-          <img src="/logo.png" alt="Welfare Bot" style={{ width: "40px", height: "40px", objectFit: "contain" }} />
+          <img 
+            src="/android-chrome-512x512.png" 
+            alt="Welfare Bot" 
+            style={{ width: "40px", height: "40px", objectFit: "contain", borderRadius: "10px" }} 
+          />
           <h1 style={{ fontSize: "24px", fontWeight: "800", color: "#0D2152" }}>Welfare Bot</h1>
         </div>
         <p style={styles.subtitle}>

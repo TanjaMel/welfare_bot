@@ -1655,14 +1655,16 @@ body {
   }
 }
 .brand-logo-img {
-  width: 52px;
-  height: 52px;
-  object-fit: contain;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
   display: block;
   flex-shrink: 0;
+  border-radius: 12px;
 }
 
 .brand-logo-img.small {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
 }
