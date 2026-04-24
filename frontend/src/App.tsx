@@ -16,7 +16,7 @@ import ChatWindow from "./components/ChatWindow";
 import LoginPage from "./components/LoginPage";
 import CareContactForm from "./components/CareContactForm";
 import WellbeingPanel from "./components/WellbeingPanel";
-import Logo from "@/assets/logo.png";
+import logoUrl from "@/assets/logo.png";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
@@ -25,6 +25,16 @@ type WellbeingInfo = {
   sub: string;
   cls: "none" | "low" | "medium" | "high" | "critical";
 };
+
+function AppLogo({ small = false }: { small?: boolean }) {
+  return (
+    <img
+      className={`brand-logo ${small ? "small" : ""}`}
+      src={logoUrl}
+      alt="Welfare Bot"
+    />
+  );
+}
 
 function getWellbeingInfo(riskLevel: string | undefined): WellbeingInfo {
   if (!riskLevel) {
@@ -293,7 +303,7 @@ export default function App() {
       <header className="top-app-bar">
         <div className="top-app-row">
           <div className="top-brand">
-            <img src={Logo} />
+            <AppLogo />
             <div className="top-brand-copy">
               <span className="top-brand-name">Welfare Bot</span>
               <span className="top-brand-sub">Care. Support. Well-being.</span>
@@ -350,7 +360,7 @@ export default function App() {
       <div className="app-body">
         <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
           <div className="sidebar-brand">
-            <img src={Logo} />
+            <AppLogo />
             <div className="sidebar-brand-copy">
               <h2>Welfare Bot</h2>
               <p>Care. Support. Well-being.</p>
