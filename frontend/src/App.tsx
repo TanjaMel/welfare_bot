@@ -350,7 +350,7 @@ export default function App() {
       <div className="app-body">
         <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
           <div className="sidebar-brand">
-            <AppLogo />
+            <img src={Logo} />
             <div className="sidebar-brand-copy">
               <h2>Welfare Bot</h2>
               <p>Care. Support. Well-being.</p>
