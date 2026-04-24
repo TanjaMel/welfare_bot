@@ -16,7 +16,7 @@ import ChatWindow from "./components/ChatWindow";
 import LoginPage from "./components/LoginPage";
 import CareContactForm from "./components/CareContactForm";
 import WellbeingPanel from "./components/WellbeingPanel";
-import Logo from "./assets/logo.png";
+import Logo from "@/assets/logo.png";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
