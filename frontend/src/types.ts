@@ -84,3 +84,40 @@ export type SendMessageResponse = {
   notifications?: unknown[];
   mode?: string;
 };
+
+export type WellbeingSummary = {
+  status: "stable" | "needs_attention" | "concerning" | "critical";
+  overall_score: number;
+  soft_message: string;
+  message: string;
+  data_completeness: number;
+  checked_at: string;
+  date: string;
+};
+
+export type WellbeingTrendPoint = {
+  date: string;
+  overall: number | null;
+  mood: number | null;
+  sleep: number | null;
+  food: number | null;
+  hydration: number | null;
+  status: string;
+  // mapped from backend
+  overall_wellbeing_score: number;
+  mood_score: number | null;
+  sleep_score: number | null;
+  food_score: number | null;
+  hydration_score: number | null;
+  medication_score: number | null;
+  social_activity_score: number | null;
+};
+
+export type WellbeingInsight = {
+  area: string;
+  message: string;
+  direction: "improving" | "stable" | "declining";
+  // mapped to frontend type
+  type: "positive" | "neutral" | "attention";
+  title: string;
+};

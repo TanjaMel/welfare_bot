@@ -8,7 +8,11 @@ import type {
   User,
   UserLogin,
   UserRegister,
+  WellbeingSummary,
+  WellbeingTrendPoint,
+  WellbeingInsight,
 } from "./types";
+
 
 const API_BASE = typeof window !== "undefined" && window.location.hostname !== "localhost"
   ? "/api/v1"  // on Railway, same domain — use relative URL
@@ -179,3 +183,28 @@ export async function deleteCareContact(id: number): Promise<void> {
   return handleResponse<void>(response);
 }
 export type { User, RiskAnalysis };
+
+export async function getWellbeingSummary(userId: number): Promise<WellbeingSummary> {
+  const response = await fetch(`${API_BASE}/wellbeing/summary/${userId}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<WellbeingSummary>(response);
+}
+
+export async function getWellbeingTrends(userId: number, days: number = 7): Promise<WellbeingTrendPoint[]> {
+  const response = await fetch(`${API_BASE}/wellbeing/trends/${userId}?days=${days}`, {
+    headers: authHeaders(),
+  });
+  // The endpoint returns { days, points, trend_message } — extract points
+  const data = await handleResponse<{ points: WellbeingTrendPoint[] }>(response);
+  return data.points;
+}
+
+export async function getWellbeingInsights(userId: number): Promise<WellbeingInsight[]> {
+  const response = await fetch(`${API_BASE}/wellbeing/insights/${userId}`, {
+    headers: authHeaders(),
+  });
+  // The endpoint returns { insights, summary } — extract insights
+  const data = await handleResponse<{ insights: WellbeingInsight[] }>(response);
+  return data.insights;
+}

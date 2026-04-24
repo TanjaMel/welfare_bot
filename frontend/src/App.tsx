@@ -15,6 +15,7 @@ import type { ConversationMessage } from "./types";
 import ChatWindow from "./components/ChatWindow";
 import LoginPage from "./components/LoginPage";
 import CareContactForm from "./components/CareContactForm";
+import WellbeingPanel from "./components/WellbeingPanel";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
@@ -128,6 +129,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showWellbeingPanel, setShowWellbeingPanel] = useState(false);
 
   const latestRisk = useMemo(() => (riskAnalyses.length > 0 ? riskAnalyses[0] : null), [riskAnalyses]);
   const wellbeing = getWellbeingInfo(latestRisk?.risk_level);
@@ -289,6 +291,7 @@ export default function App() {
     if (!selected) return;
 
     setError(null);
+    setShowWellbeingPanel(false);
     applyUserMeta(selected);
     await loadConversationData(selected.id);
   }
@@ -408,36 +411,129 @@ export default function App() {
 
         <section className="sidebar-section">
           <h3 className="section-title">Quick actions</h3>
+
           <div className="actions-list">
+            <button
+              className="action-item"
+              onClick={() => setShowWellbeingPanel((prev) => !prev)}
+              disabled={!userId}
+            >
+              <span className="action-icon blue">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M5 15L9 11L13 14L19 7"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M5 19H19"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+
+              <span>
+                <strong>{showWellbeingPanel ? "Back to chat" : "Your wellbeing trends"}</strong>
+                <small>{showWellbeingPanel ? "Return to conversation" : "View your recent trends"}</small>
+              </span>
+
+              <span className="action-arrow">›</span>
+            </button>
+
             <button
               className="action-item"
               onClick={() => void handleRefresh()}
               disabled={!userId || loading || bootstrapping}
             >
+              <span className="action-icon blue">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M20 12A8 8 0 1 1 17.657 6.343"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M20 5V10H15"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+
               <span>
                 <strong>Refresh conversation</strong>
                 <small>Get the latest updates</small>
               </span>
+
               <span className="action-arrow">›</span>
             </button>
 
             <button
-              className="action-item"
+              className="action-item danger"
               onClick={() => void handleClearChat()}
               disabled={!userId || loading}
             >
+              <span className="action-icon red">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M5 7H19" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                  <path d="M10 11V17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                  <path d="M14 11V17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                  <path
+                    d="M8 7L8.6 19H15.4L16 7"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M10 7V5H14V7"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+
               <span>
                 <strong>Clear chat</strong>
                 <small>Start a new conversation</small>
               </span>
+
               <span className="action-arrow">›</span>
             </button>
 
             <button className="action-item" onClick={() => logout()}>
+              <span className="action-icon gray">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M10 6H6.8C5.806 6 5 6.806 5 7.8V16.2C5 17.194 5.806 18 6.8 18H10"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M14 8L18 12L14 16"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M18 12H10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                </svg>
+              </span>
+
               <span>
                 <strong>Log out</strong>
                 <small>Sign out from your account</small>
               </span>
+
               <span className="action-arrow">›</span>
             </button>
           </div>
@@ -449,16 +545,20 @@ export default function App() {
       </aside>
 
       <main className="main-panel">
-        <ChatWindow
-          title="Welfare Bot Chat"
-          subtitle="Reliable conversational support for everyday well-being"
-          messages={messages}
-          onSend={handleSend}
-          loading={loading || bootstrapping}
-          error={error}
-          language="auto"
-          userInitial={userInitial}
-        />
+        {showWellbeingPanel && userId ? (
+          <WellbeingPanel userId={userId} />
+        ) : (
+          <ChatWindow
+            title="Welfare Bot Chat"
+            subtitle="Reliable conversational support for everyday well-being"
+            messages={messages}
+            onSend={handleSend}
+            loading={loading || bootstrapping}
+            error={error}
+            language="auto"
+            userInitial={userInitial}
+          />
+        )}
       </main>
     </div>
   );
