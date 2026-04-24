@@ -27,32 +27,11 @@ type WellbeingInfo = {
 
 function AppLogo({ small = false }: { small?: boolean }) {
   return (
-    <div className={`brand-logo ${small ? "small" : ""}`} aria-hidden="true">
-      <svg viewBox="0 0 64 64" fill="none">
-        <defs>
-          <linearGradient id="wbGradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#4F7DF3" />
-            <stop offset="100%" stopColor="#6A8BFF" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M32 6L50 16C53.105 17.725 55 21.001 55 24.55V39.45C55 42.999 53.105 46.275 50 48L32 58L14 48C10.895 46.275 9 42.999 9 39.45V24.55C9 21.001 10.895 17.725 14 16L32 6Z"
-          fill="url(#wbGradient)"
-        />
-        <circle cx="32" cy="22" r="6.4" fill="white" />
-        <path
-          d="M21.2 35.2C21.2 33.433 22.633 32 24.4 32H39.2C40.967 32 42.4 33.433 42.4 35.2L34.3 44.4C33.037 45.833 30.814 45.871 29.503 44.483L21.2 35.2Z"
-          fill="white"
-        />
-        <path
-          d="M27.5 36.3L31.4 40.1L40.1 30.8"
-          stroke="#3E6FF2"
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
+    <img
+      className={`brand-logo-img ${small ? "small" : ""}`}
+      src="/icon.png"
+      alt="Welfare Bot"
+    />
   );
 }
 

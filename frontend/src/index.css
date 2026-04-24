@@ -1654,3 +1654,15 @@ body {
     font-size: 9px;
   }
 }
+.brand-logo-img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
+.brand-logo-img.small {
+  width: 24px;
+  height: 24px;
+}
