@@ -24,13 +24,15 @@ type WellbeingInfo = {
   sub: string;
   cls: "none" | "low" | "medium" | "high" | "critical";
 };
-
 function AppLogo({ small = false }: { small?: boolean }) {
   return (
-    <img src="/logo.png" alt="Welfare Bot" className="brand-logo-img" />
+    <img
+      src="/logo.png"
+      alt="Welfare Bot"
+      className={`brand-logo-img ${small ? "small" : ""}`}
+    />
   );
 }
-
 
 function getWellbeingInfo(riskLevel: string | undefined): WellbeingInfo {
   if (!riskLevel) {
