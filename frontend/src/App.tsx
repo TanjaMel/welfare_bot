@@ -27,7 +27,7 @@ type WellbeingInfo = {
 function AppLogo({ small = false }: { small?: boolean }) {
   return (
     <img
-      src="/logo.png"
+      src="/android-chrome-512x512.png"
       alt="Welfare Bot"
       className={`brand-logo-img ${small ? "small" : ""}`}
     />
