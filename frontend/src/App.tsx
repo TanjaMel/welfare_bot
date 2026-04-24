@@ -57,9 +57,7 @@ function AppLogo({ small = false }: { small?: boolean }) {
 }
 
 function getWellbeingInfo(riskLevel: string | undefined): WellbeingInfo {
-  if (!riskLevel) {
-    return { label: "No recent assessment", sub: "Start or continue the conversation.", cls: "none" };
-  }
+  if (!riskLevel) return { label: "No recent assessment", sub: "Start or continue the conversation.", cls: "none" };
   switch (riskLevel.toLowerCase()) {
     case "low": return { label: "Stable condition", sub: "No immediate concerns detected.", cls: "low" };
     case "medium": return { label: "Needs closer follow-up", sub: "Some concerns were detected.", cls: "medium" };
@@ -97,6 +95,7 @@ export default function App() {
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<"chat" | "trends">("chat");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const latestRisk = useMemo(() => (riskAnalyses.length > 0 ? riskAnalyses[0] : null), [riskAnalyses]);
   const wellbeing = getWellbeingInfo(latestRisk?.risk_level);
@@ -234,6 +233,7 @@ export default function App() {
     if (!selected) return;
     setError(null);
     setActiveView("chat");
+    setSidebarOpen(false);
     applyUserMeta(selected);
     await loadConversationData(selected.id);
   }
@@ -262,182 +262,208 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <AppLogo />
-          <div className="sidebar-brand-copy">
-            <h2>Welfare Bot</h2>
-            <p>Care. Support. Well-being.</p>
+
+      {/* TOP APP BAR */}
+      <header className="top-app-bar">
+        <div className="top-app-row">
+          <div className="top-brand">
+            <AppLogo />
+            <div className="top-brand-copy">
+              <span className="top-brand-name">Welfare Bot</span>
+              <span className="top-brand-sub">Care. Support. Well-being.</span>
+            </div>
+          </div>
+          <div className="top-user-card">
+            <div className="top-user-avatar">{userInitial}</div>
+            <div className="top-user-copy">
+              <span className="top-user-name">{userName}</span>
+              <span className="top-user-sub">Current user</span>
+            </div>
           </div>
         </div>
 
-        <section className="sidebar-card profile-card">
-          <div className="profile-avatar">{userInitial}</div>
-          <div className="profile-copy">
-            <div className="profile-name">{userName}</div>
-            <div className="profile-sub">Current user</div>
-          </div>
-        </section>
+        <div className="top-nav-row">
+          <button
+            type="button"
+            className="top-menu-btn"
+            aria-label="Open menu"
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+              <path d="M3 7H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path d="M3 12H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path d="M3 17H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
 
-        {currentUserRole === "admin" && users.length > 1 && (
+          <div className="top-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "chat"}
+              className={`top-tab ${activeView === "chat" ? "active" : ""}`}
+              onClick={() => setActiveView("chat")}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === "trends"}
+              className={`top-tab ${activeView === "trends" ? "active" : ""}`}
+              onClick={() => setActiveView("trends")}
+            >
+              Your wellbeing trends
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* BODY */}
+      <div className="app-body">
+        <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+          <div className="sidebar-profile-compact">
+            <div className="profile-avatar">{userInitial}</div>
+            <div className="profile-copy">
+              <div className="profile-name">{userName}</div>
+              <div className="profile-sub">Current user</div>
+            </div>
+          </div>
+
+          {currentUserRole === "admin" && users.length > 1 && (
+            <section className="sidebar-section">
+              <h3 className="section-title">User selection</h3>
+              <div className="sidebar-card">
+                <label className="field-label" htmlFor="user-select">Active user</label>
+                <select
+                  id="user-select"
+                  className="user-select"
+                  value={userId ?? ""}
+                  onChange={(e) => void handleUserChange(Number(e.target.value))}
+                  disabled={loading || bootstrapping}
+                >
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.first_name} {user.last_name} (#{user.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </section>
+          )}
+
           <section className="sidebar-section">
-            <h3 className="section-title">User selection</h3>
-            <div className="sidebar-card">
-              <label className="field-label" htmlFor="user-select">Active user</label>
-              <select
-                id="user-select"
-                className="user-select"
-                value={userId ?? ""}
-                onChange={(e) => void handleUserChange(Number(e.target.value))}
-                disabled={loading || bootstrapping}
-              >
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.first_name} {user.last_name} (#{user.id})
-                  </option>
-                ))}
-              </select>
+            <h3 className="section-title">Today's status</h3>
+            <div className="sidebar-card wellbeing-card redesigned">
+              <div className={`wellbeing-status-dot ${wellbeing.cls}`} />
+              <div className="wellbeing-copy">
+                <div className="wellbeing-text-main">{wellbeing.label}</div>
+                <div className="wellbeing-text-sub">{wellbeing.sub}</div>
+                {latestRisk?.reason && (
+                  <div className="risk-meta-block">
+                    <span className="risk-meta-label">Reason</span>
+                    <p>{latestRisk.reason}</p>
+                  </div>
+                )}
+                {latestRisk?.suggested_action && (
+                  <div className="risk-meta-block">
+                    <span className="risk-meta-label">Suggested action</span>
+                    <p>{latestRisk.suggested_action}</p>
+                  </div>
+                )}
+                {latestRisk?.follow_up_question && (
+                  <div className="risk-meta-block">
+                    <span className="risk-meta-label">Follow-up</span>
+                    <p>{latestRisk.follow_up_question}</p>
+                  </div>
+                )}
+                {(latestRisk?.needs_family_notification || latestRisk?.should_alert_family) && (
+                  <div className="risk-notice">Family notification recommended</div>
+                )}
+                <div className="wellbeing-time">Checked at {timeStr}</div>
+              </div>
             </div>
           </section>
-        )}
 
-        <section className="sidebar-section">
-          <h3 className="section-title">Today's status</h3>
-          <div className="sidebar-card wellbeing-card redesigned">
-            <div className={`wellbeing-status-dot ${wellbeing.cls}`} />
-            <div className="wellbeing-copy">
-              <div className="wellbeing-text-main">{wellbeing.label}</div>
-              <div className="wellbeing-text-sub">{wellbeing.sub}</div>
-              {latestRisk?.reason && (
-                <div className="risk-meta-block">
-                  <span className="risk-meta-label">Reason</span>
-                  <p>{latestRisk.reason}</p>
-                </div>
-              )}
-              {latestRisk?.suggested_action && (
-                <div className="risk-meta-block">
-                  <span className="risk-meta-label">Suggested action</span>
-                  <p>{latestRisk.suggested_action}</p>
-                </div>
-              )}
-              {latestRisk?.follow_up_question && (
-                <div className="risk-meta-block">
-                  <span className="risk-meta-label">Follow-up</span>
-                  <p>{latestRisk.follow_up_question}</p>
-                </div>
-              )}
-              {(latestRisk?.needs_family_notification || latestRisk?.should_alert_family) && (
-                <div className="risk-notice">Family notification recommended</div>
-              )}
-              <div className="wellbeing-time">Checked at {timeStr}</div>
+          <section className="sidebar-section">
+            <h3 className="section-title">Care contact</h3>
+            {userId && <CareContactForm userId={userId} />}
+          </section>
+
+          <section className="sidebar-section">
+            <h3 className="section-title">Quick actions</h3>
+            <div className="actions-list">
+              <button
+                className="action-item"
+                onClick={() => void handleRefresh()}
+                disabled={!userId || loading || bootstrapping}
+              >
+                <span className="action-icon blue">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M20 12A8 8 0 1 1 17.657 6.343" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                    <path d="M20 5V10H15" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <span><strong>Refresh conversation</strong><small>Get the latest updates</small></span>
+                <span className="action-arrow">›</span>
+              </button>
+
+              <button
+                className="action-item danger"
+                onClick={() => void handleClearChat()}
+                disabled={!userId || loading}
+              >
+                <span className="action-icon red">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M5 7H19" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                    <path d="M10 11V17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                    <path d="M14 11V17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                    <path d="M8 7L8.6 19H15.4L16 7" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
+                    <path d="M10 7V5H14V7" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <span><strong>Clear chat</strong><small>Start a new conversation</small></span>
+                <span className="action-arrow">›</span>
+              </button>
+
+              <button className="action-item" onClick={() => logout()}>
+                <span className="action-icon gray">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M10 6H6.8C5.806 6 5 6.806 5 7.8V16.2C5 17.194 5.806 18 6.8 18H10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                    <path d="M14 8L18 12L14 16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M18 12H10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span><strong>Log out</strong><small>Sign out from your account</small></span>
+                <span className="action-arrow">›</span>
+              </button>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="sidebar-section">
-          <h3 className="section-title">Care contact</h3>
-          {userId && <CareContactForm userId={userId} />}
-        </section>
+          <div className="sidebar-footer">Reliable conversational support</div>
+        </aside>
 
-        <section className="sidebar-section">
-          <h3 className="section-title">Quick actions</h3>
-          <div className="actions-list">
-            <button
-              className="action-item"
-              onClick={() => void handleRefresh()}
-              disabled={!userId || loading || bootstrapping}
-            >
-              <span className="action-icon blue">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M20 12A8 8 0 1 1 17.657 6.343" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                  <path d="M20 5V10H15" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-              <span>
-                <strong>Refresh conversation</strong>
-                <small>Get the latest updates</small>
-              </span>
-              <span className="action-arrow">›</span>
-            </button>
-
-            <button
-              className="action-item danger"
-              onClick={() => void handleClearChat()}
-              disabled={!userId || loading}
-            >
-              <span className="action-icon red">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M5 7H19" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                  <path d="M10 11V17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                  <path d="M14 11V17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                  <path d="M8 7L8.6 19H15.4L16 7" stroke="currentColor" strokeWidth="1.9" strokeLinejoin="round" />
-                  <path d="M10 7V5H14V7" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-              <span>
-                <strong>Clear chat</strong>
-                <small>Start a new conversation</small>
-              </span>
-              <span className="action-arrow">›</span>
-            </button>
-
-            <button className="action-item" onClick={() => logout()}>
-              <span className="action-icon gray">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M10 6H6.8C5.806 6 5 6.806 5 7.8V16.2C5 17.194 5.806 18 6.8 18H10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                  <path d="M14 8L18 12L14 16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M18 12H10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                </svg>
-              </span>
-              <span>
-                <strong>Log out</strong>
-                <small>Sign out from your account</small>
-              </span>
-              <span className="action-arrow">›</span>
-            </button>
-          </div>
-        </section>
-
-        <div className="sidebar-footer">Reliable conversational support</div>
-      </aside>
-
-      <main className="main-panel">
-        <div className="view-switcher" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === "chat"}
-            className={`view-tab ${activeView === "chat" ? "active" : ""}`}
-            onClick={() => setActiveView("chat")}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === "trends"}
-            className={`view-tab ${activeView === "trends" ? "active" : ""}`}
-            onClick={() => setActiveView("trends")}
-          >
-            Your wellbeing trends
-          </button>
-        </div>
-
-        {activeView === "trends" && userId ? (
-          <WellbeingPanel userId={userId} />
-        ) : (
-          <ChatWindow
-            title="Welfare Bot Chat"
-            subtitle="Reliable conversational support for everyday well-being"
-            messages={messages}
-            onSend={handleSend}
-            loading={loading || bootstrapping}
-            error={error}
-            language="auto"
-            userInitial={userInitial}
-          />
+        {sidebarOpen && (
+          <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
         )}
-      </main>
+
+        <main className="main-panel">
+          {activeView === "trends" && userId ? (
+            <WellbeingPanel userId={userId} />
+          ) : (
+            <ChatWindow
+              title="Welfare Bot Chat"
+              subtitle="Reliable conversational support for everyday well-being"
+              messages={messages}
+              onSend={handleSend}
+              loading={loading || bootstrapping}
+              error={error}
+              language="auto"
+              userInitial={userInitial}
+            />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
