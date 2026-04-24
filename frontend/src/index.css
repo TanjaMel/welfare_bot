@@ -1848,20 +1848,32 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Final logo size fix */
+
 .brand-logo {
-  width: 52px;
-  height: 52px;
-  flex-shrink: 0;
-  object-fit: contain;
+  width: 48px !important;
+  height: 48px !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+  object-fit: contain !important;
   display: block;
+  flex-shrink: 0;
+}
+
+.brand-logo.small {
+  width: 28px !important;
+  height: 28px !important;
+  max-width: 28px !important;
+  max-height: 28px !important;
 }
 
 .sidebar-brand .brand-logo {
-  width: 46px;
-  height: 46px;
+  width: 48px !important;
+  height: 48px !important;
 }
 
 .top-brand .brand-logo {
-  width: 42px;
-  height: 42px;
+  width: 42px !important;
+  height: 42px !important;
 }
