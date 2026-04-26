@@ -341,6 +341,3 @@ npm run dev
 * scalable monitoring
 * early intervention
 
----
-
-## License
