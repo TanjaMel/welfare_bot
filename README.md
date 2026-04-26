@@ -13,6 +13,30 @@ The goal is simple: detect problems early — before they become emergencies.
 https://welfarebot-production.up.railway.app
 
 ---
+## Screenshots
+
+### Registration
+
+![Registration](frontend/public/screenshots/register.png)
+
+---
+
+### Login
+
+![Login](frontend/public/screenshots/login.png)
+
+---
+
+### Chat
+Core interaction: natural conversation with risk-aware responses.
+
+![Chat](frontend/public/screenshots/chat.png)
+
+### Wellbeing trends
+
+![Wellbeing trends](frontend/public/screenshots/trends.png)
+
+---
 
 ## The Problem
 
@@ -128,28 +152,6 @@ Results are presented as human-readable insights rather than raw numerical data.
 3. Send a message (e.g. "I haven't eaten today")
 4. Observe risk detection
 5. Check the wellbeing panel
-
----
-
-## Screenshots
-
-(Add actual screenshots before submission)
-
-### Registration
-
-![Registration](./screenshots/register.png)
-
-### Chat Interface
-
-![Chat](./screenshots/chat.png)
-
-### Risk Detection
-
-![Risk](./screenshots/risk-high.png)
-
-### Wellbeing Analytics
-
-![Analytics](./screenshots/analytics.png)
 
 ---
 
@@ -341,3 +343,4 @@ npm run dev
 
 ---
 
+## License
