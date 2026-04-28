@@ -20,14 +20,18 @@ from app.schemas.risk_analysis import RiskAnalysisResponse
 from app.schemas.notification import NotificationRead
 from app.services import risk_service
 from app.services.conversation_starter import get_opening_message, get_follow_up
+from app.services.memory_service import (
+    get_memory_context,
+    summarize_session,
+    should_summarize,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ---------------------------------------------------------------------------
 # GET /{user_id}/messages
-# ---------------------------------------------------------------------------
+
 @router.get(
     "/{user_id}/messages",
     response_model=List[ConversationMessageRead],
@@ -42,9 +46,8 @@ def get_messages(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-# ---------------------------------------------------------------------------
 # DELETE /{user_id}/messages
-# ---------------------------------------------------------------------------
+
 @router.delete("/{user_id}/messages", status_code=204, summary="Delete User Messages")
 def delete_messages(user_id: int, db: Session = Depends(get_db)):
     db.query(ConversationMessage).filter(
@@ -53,9 +56,8 @@ def delete_messages(user_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-# ---------------------------------------------------------------------------
 # GET /{user_id}/risk-analysis
-# ---------------------------------------------------------------------------
+
 @router.get(
     "/{user_id}/risk-analysis",
     response_model=List[RiskAnalysisResponse],
@@ -70,9 +72,8 @@ def get_user_risk(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-# ---------------------------------------------------------------------------
 # GET /{user_id}/notifications
-# ---------------------------------------------------------------------------
+
 @router.get(
     "/{user_id}/notifications",
     response_model=List[NotificationRead],
@@ -86,10 +87,8 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-
-# ---------------------------------------------------------------------------
 # POST /start
-# ---------------------------------------------------------------------------
+
 @router.post(
     "/start",
     response_model=ConversationMessageRead,
@@ -132,9 +131,8 @@ def start_conversation(
     return msg
 
 
-# ---------------------------------------------------------------------------
 # POST /message
-# ---------------------------------------------------------------------------
+
 @router.post(
     "/message",
     response_model=SendMessageResponse,
@@ -194,7 +192,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         follow_up_question=result["follow_up_question"],
         signals_json=result["signals"],
         reasons_json=result["reasons"],
-        model_version="rule_engine_v1",
+        model_version="llm+rules_v2",
     )
     db.add(risk)
     db.commit()
@@ -219,7 +217,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         db.refresh(notif)
         notifications_out.append(NotificationRead.model_validate(notif).model_dump())
 
-    # 7. Count total messages today (user + assistant) for daily limit
+    # 7. Count total messages today for daily limit
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -252,6 +250,14 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(assistant_msg)
 
+        # Summarize session when hitting the daily limit
+        _trigger_session_summary(
+            user_id=payload.user_id,
+            db=db,
+            today_start=today_start,
+            is_closing=True,
+        )
+
         return SendMessageResponse(
             reply=closing,
             risk_analysis=RiskAnalysisResponse.model_validate(risk).model_dump(),
@@ -270,7 +276,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         .count()
     )
 
-    # 10. Generate reply
+    # 10. Generate reply (with memory context injected)
     ai_reply = _generate_reply(
         message=payload.message,
         language=result["language"],
@@ -299,18 +305,57 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         mode="non_stream",
     )
 
-
-# ---------------------------------------------------------------------------
 # POST /message/stream
-# ---------------------------------------------------------------------------
+
 @router.post("/message/stream", summary="Send Message Stream")
 def send_message_stream(payload: SendMessageRequest):
     return {"detail": "Streaming not yet implemented"}
 
 
-# ---------------------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
+
+def _trigger_session_summary(
+    user_id: int,
+    db: Session,
+    today_start: datetime,
+    is_closing: bool = False,
+) -> None:
+    """
+    Fire-and-forget session summarization.
+    Fetches today's messages and calls memory_service.summarize_session().
+    Failures are swallowed — summary is best-effort, never blocks the response.
+    """
+    try:
+        from app.db.models.user import User
+
+        today_msgs = (
+            db.query(ConversationMessage)
+            .filter(
+                ConversationMessage.user_id == user_id,
+                ConversationMessage.created_at >= today_start,
+            )
+            .order_by(ConversationMessage.created_at)
+            .all()
+        )
+
+        messages = [
+            {"role": m.role, "content": m.content}
+            for m in today_msgs
+        ]
+
+        user = db.query(User).filter(User.id == user_id).first()
+        previous_summary = user.memory_summary if user else None
+
+        summarize_session(
+            user_id=user_id,
+            messages=messages,
+            db=db,
+            previous_summary=previous_summary,
+        )
+    except Exception as e:
+        logger.warning("Session summary trigger failed for user %d: %s", user_id, e)
+
+
 def _generate_reply(
     message: str,
     language: str,
@@ -386,6 +431,11 @@ def _generate_reply(
             system_prompt = high_risk_prompts.get(language, high_risk_prompts["en"])
         else:
             system_prompt = system_prompts.get(language, system_prompts["en"])
+
+        # Inject memory context from previous sessions
+        memory_context = get_memory_context(user_id=user_id, db=db, language=language)
+        if memory_context:
+            system_prompt = memory_context + "\n\n" + system_prompt
 
         # Add follow-up instruction if early in conversation
         if user_messages_today <= 2 and follow_up and risk_level not in ("high", "critical"):
