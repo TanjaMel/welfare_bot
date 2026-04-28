@@ -1,2 +1,6 @@
-# Empty — endpoints import directly from specific service modules.
-# Do NOT add eager imports here; they cause cascade failures on startup.
+# app/services/__init__.py
+
+# Explicit export for tests and imports
+from . import scheduler
+
+__all__ = ["scheduler"]

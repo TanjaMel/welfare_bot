@@ -10,6 +10,7 @@ from app.db.models.conversation_message import ConversationMessage
 from app.db.models.daily_checkin import DailyCheckIn
 from app.db.models.risk_analysis import RiskAnalysis
 from app.db.models.wellbeing_daily_metrics import WellbeingDailyMetrics
+from app.services.aggregation_pipeline_class import AggregationPipeline  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
