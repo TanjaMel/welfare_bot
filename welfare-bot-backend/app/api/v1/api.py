@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     wellbeing,
 )
 from app.api.v1.endpoints.admin_dashboard import router as admin_router
+from app.api.v1.endpoints.data_quality import router as dq_router
 
 api_router = APIRouter()
 
@@ -23,4 +24,5 @@ api_router.include_router(risk_analysis.router, prefix="/risk-analysis",  tags=[
 api_router.include_router(notifications.router, prefix="/notifications",  tags=["notifications"])
 api_router.include_router(voice.router,         prefix="/voice",         tags=["voice"])
 api_router.include_router(wellbeing.router,     prefix="/wellbeing",      tags=["wellbeing"])
-api_router.include_router(admin_router, prefix="/admin", tags=["Admin Dashboard"])
+api_router.include_router(admin_router,         prefix="/admin",          tags=["Admin Dashboard"])
+api_router.include_router(dq_router,            prefix="/admin/data-quality",         tags=["Data Quality"])
