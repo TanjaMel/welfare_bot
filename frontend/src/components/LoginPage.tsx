@@ -14,6 +14,7 @@ interface FormErrors {
   last_name?: string;
   email?: string;
   password?: string;
+  confirm_password?: string;
   role?: string;
   consents?: string;
 }
@@ -25,10 +26,12 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   const [resetEmailSent, setResetEmailSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -46,6 +49,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
 
   const isEmailValid = validateEmail(email);
   const isPasswordValid = password.length >= 8;
+  const isConfirmPasswordValid = password === confirmPassword;
   const allConsents = consentPersonalData && consentAiAnalysis && consentMedicalDisclaimer;
 
   const registerReady = useMemo(() => {
@@ -55,10 +59,11 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
       email.trim().length > 0 &&
       isEmailValid &&
       isPasswordValid &&
+      isConfirmPasswordValid &&
       role === "user" &&
       allConsents
     );
-  }, [firstName, lastName, email, isEmailValid, isPasswordValid, role, allConsents]);
+  }, [firstName, lastName, email, isEmailValid, isPasswordValid, isConfirmPasswordValid, role, allConsents]);
 
   const loginReady = email.trim().length > 0 && isEmailValid && isPasswordValid;
   const submitDisabled = loading || (mode === "register" ? !registerReady : !loginReady);
@@ -78,6 +83,11 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
       if (!role) nextErrors.role = "Please select an account type.";
       if (role === "family") nextErrors.role = "Family member accounts are currently in development.";
       if (!allConsents) nextErrors.consents = "Please confirm all data and safety statements.";
+      if (!confirmPassword) {
+        nextErrors.confirm_password = "Please confirm your password.";
+      } else if (password !== confirmPassword) {
+        nextErrors.confirm_password = "Passwords do not match.";
+      }
     }
 
     if (!email.trim()) {
@@ -101,18 +111,12 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     setResetEmailSent(false);
 
     if (!email.trim()) {
-      setErrors((prev) => ({
-        ...prev,
-        email: "Enter your email first.",
-      }));
+      setErrors((prev) => ({ ...prev, email: "Enter your email first." }));
       return;
     }
 
     if (!validateEmail(email)) {
-      setErrors((prev) => ({
-        ...prev,
-        email: "Please enter a valid email address.",
-      }));
+      setErrors((prev) => ({ ...prev, email: "Please enter a valid email address." }));
       return;
     }
 
@@ -123,9 +127,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
       setResetEmailSent(true);
     } catch (err: unknown) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Password reset request failed. Please try again."
+        err instanceof Error ? err.message : "Password reset request failed. Please try again."
       );
     } finally {
       setResetLoading(false);
@@ -175,6 +177,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     setErrors({});
     setEmail("");
     setPassword("");
+    setConfirmPassword("");
     setFirstName("");
     setLastName("");
     setPhone("");
@@ -184,6 +187,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     setConsentAiAnalysis(false);
     setConsentMedicalDisclaimer(false);
     setShowPassword(false);
+    setShowConfirmPassword(false);
   }
 
   return (
@@ -236,10 +240,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                     id="first-name"
                     type="text"
                     value={firstName}
-                    onChange={(e) => {
-                      setFirstName(e.target.value);
-                      clearFieldError("first_name");
-                    }}
+                    onChange={(e) => { setFirstName(e.target.value); clearFieldError("first_name"); }}
                     autoComplete="given-name"
                     disabled={loading}
                     aria-invalid={!!errors.first_name}
@@ -253,10 +254,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                     id="last-name"
                     type="text"
                     value={lastName}
-                    onChange={(e) => {
-                      setLastName(e.target.value);
-                      clearFieldError("last_name");
-                    }}
+                    onChange={(e) => { setLastName(e.target.value); clearFieldError("last_name"); }}
                     autoComplete="family-name"
                     disabled={loading}
                     aria-invalid={!!errors.last_name}
@@ -304,11 +302,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  clearFieldError("email");
-                  setResetEmailSent(false);
-                }}
+                onChange={(e) => { setEmail(e.target.value); clearFieldError("email"); setResetEmailSent(false); }}
                 placeholder="you@example.com"
                 autoComplete="email"
                 disabled={loading || resetLoading}
@@ -324,10 +318,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    clearFieldError("password");
-                  }}
+                  onChange={(e) => { setPassword(e.target.value); clearFieldError("password"); }}
                   placeholder="Minimum 8 characters"
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
                   disabled={loading}
@@ -336,7 +327,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                 <button
                   type="button"
                   className="auth-password-toggle"
-                  onClick={() => setShowPassword((value) => !value)}
+                  onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? "Hide" : "Show"}
@@ -348,6 +339,40 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                 <span className="auth-field-hint">Minimum 8 characters.</span>
               )}
             </div>
+
+            {/* Confirm password — only shown during registration */}
+            {mode === "register" && (
+              <div className="auth-field">
+                <label htmlFor="confirm-password">Confirm password</label>
+                <div className="auth-password-field">
+                  <input
+                    id="confirm-password"
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => { setConfirmPassword(e.target.value); clearFieldError("confirm_password"); }}
+                    placeholder="Repeat your password"
+                    autoComplete="new-password"
+                    disabled={loading}
+                    aria-invalid={!!errors.confirm_password}
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+                {errors.confirm_password ? (
+                  <span className="auth-field-error">{errors.confirm_password}</span>
+                ) : confirmPassword && password !== confirmPassword ? (
+                  <span className="auth-field-error">Passwords do not match.</span>
+                ) : confirmPassword && password === confirmPassword ? (
+                  <span style={{ color: "#16a34a", fontSize: 13 }}>✓ Passwords match</span>
+                ) : null}
+              </div>
+            )}
 
             {mode === "login" && (
               <div className="auth-forgot-row">
@@ -375,10 +400,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                         type="radio"
                         name="role"
                         checked={role === "user"}
-                        onChange={() => {
-                          setRole("user");
-                          clearFieldError("role");
-                        }}
+                        onChange={() => { setRole("user"); clearFieldError("role"); }}
                         disabled={loading}
                       />
                       <span>
@@ -392,10 +414,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                         type="radio"
                         name="role"
                         checked={role === "family"}
-                        onChange={() => {
-                          setRole("family");
-                          clearFieldError("role");
-                        }}
+                        onChange={() => { setRole("family"); clearFieldError("role"); }}
                         disabled={loading}
                       />
                       <span>
@@ -423,10 +442,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                     <input
                       type="checkbox"
                       checked={consentPersonalData}
-                      onChange={(e) => {
-                        setConsentPersonalData(e.target.checked);
-                        clearFieldError("consents");
-                      }}
+                      onChange={(e) => { setConsentPersonalData(e.target.checked); clearFieldError("consents"); }}
                       disabled={loading}
                     />
                     <span>I agree to the processing of my personal and wellbeing data.</span>
@@ -436,10 +452,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                     <input
                       type="checkbox"
                       checked={consentAiAnalysis}
-                      onChange={(e) => {
-                        setConsentAiAnalysis(e.target.checked);
-                        clearFieldError("consents");
-                      }}
+                      onChange={(e) => { setConsentAiAnalysis(e.target.checked); clearFieldError("consents"); }}
                       disabled={loading}
                     />
                     <span>I agree that my messages may be analyzed by AI to assess wellbeing.</span>
@@ -449,10 +462,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                     <input
                       type="checkbox"
                       checked={consentMedicalDisclaimer}
-                      onChange={(e) => {
-                        setConsentMedicalDisclaimer(e.target.checked);
-                        clearFieldError("consents");
-                      }}
+                      onChange={(e) => { setConsentMedicalDisclaimer(e.target.checked); clearFieldError("consents"); }}
                       disabled={loading}
                     />
                     <span>

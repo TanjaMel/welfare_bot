@@ -15,11 +15,13 @@ type Props = {
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname !== "localhost"
     ? "/api/v1"
-    : "http://127.0.0.1:8000/api/v1";
+    : "/api/v1";
 
 function formatTime(value?: string | null): string {
   if (!value) return "";
-  const date = new Date(value);
+  // Ensure UTC parsing by appending Z if no timezone info present
+  const normalized = value.endsWith("Z") || value.includes("+") ? value : value + "Z";
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -77,6 +79,7 @@ export default function ChatWindow({
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<number | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [recordingError, setRecordingError] = useState<string | null>(null);
 
@@ -104,19 +107,28 @@ export default function ChatWindow({
     const last = messages[messages.length - 1];
 
     if (last?.role === "assistant" && last.content) {
-      void speakText(last.content);
+      void speakText(last.content, last.id);
     }
   }, [messages, voiceEnabled]);
 
-  async function speakText(text: string) {
-    if (!text.trim()) return;
-
+  function stopSpeaking() {
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.src = "";
       audioRef.current = null;
     }
+    setIsSpeaking(false);
+    setSpeakingMessageId(null);
+  }
+
+  async function speakText(text: string, messageId?: number) {
+    if (!text.trim()) return;
+
+    // Always stop any current audio before starting new one
+    stopSpeaking();
 
     setIsSpeaking(true);
+    setSpeakingMessageId(messageId ?? null);
 
     try {
       const token = localStorage.getItem("access_token");
@@ -138,25 +150,20 @@ export default function ChatWindow({
       audioRef.current = audio;
       audio.onended = () => {
         setIsSpeaking(false);
+        setSpeakingMessageId(null);
         URL.revokeObjectURL(audioUrl);
       };
       audio.onerror = () => {
         setIsSpeaking(false);
+        setSpeakingMessageId(null);
         URL.revokeObjectURL(audioUrl);
       };
 
       await audio.play();
     } catch {
       setIsSpeaking(false);
+      setSpeakingMessageId(null);
     }
-  }
-
-  function stopSpeaking() {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    setIsSpeaking(false);
   }
 
   async function startRecording() {
@@ -277,6 +284,7 @@ export default function ChatWindow({
           messages.map((message) => {
             const isUser = message.role === "user";
             const riskClass = getRiskClass(message.risk_level);
+            const isThisMessageSpeaking = speakingMessageId === message.id && isSpeaking;
 
             return (
               <div key={message.id} className={`message-row ${isUser ? "user" : "assistant"}`}>
@@ -300,9 +308,13 @@ export default function ChatWindow({
                     <button
                       className="play-btn"
                       type="button"
-                      onClick={() => (isSpeaking ? stopSpeaking() : void speakText(message.content))}
+                      onClick={() =>
+                        isThisMessageSpeaking
+                          ? stopSpeaking()
+                          : void speakText(message.content, message.id)
+                      }
                     >
-                      {isSpeaking ? "Stop audio" : "Play audio"}
+                      {isThisMessageSpeaking ? "Stop audio" : "Play audio"}
                     </button>
                   )}
 
