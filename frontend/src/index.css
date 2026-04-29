@@ -2072,3 +2072,41 @@ body {
   width: 42px !important;
   height: 42px !important;
 }
+
+.auth-forgot-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -6px;
+}
+
+.auth-forgot-btn {
+  background: none;
+  border: none;
+  color: #4F7DF3;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.auth-forgot-btn:hover:not(:disabled) {
+  color: #0D2152;
+  text-decoration: underline;
+}
+
+.auth-forgot-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auth-success-banner {
+  background: #F0F8F3;
+  border: 1px solid #BFE5C8;
+  border-radius: 14px;
+  padding: 13px 15px;
+  color: #247A3D;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}

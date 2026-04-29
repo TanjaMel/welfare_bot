@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { login, register } from "../api";
+import { login, register, requestPasswordReset } from "../api";
 import type { UserRegister } from "../types";
 
 interface LoginPageProps {
@@ -21,6 +21,8 @@ interface FormErrors {
 export default function LoginPage({ onSuccess }: LoginPageProps) {
   const [mode, setMode] = useState<Mode>("login");
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -94,6 +96,42 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     return Object.keys(nextErrors).length === 0;
   }
 
+  async function handlePasswordReset() {
+    setError(null);
+    setResetEmailSent(false);
+
+    if (!email.trim()) {
+      setErrors((prev) => ({
+        ...prev,
+        email: "Enter your email first.",
+      }));
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      setErrors((prev) => ({
+        ...prev,
+        email: "Please enter a valid email address.",
+      }));
+      return;
+    }
+
+    setResetLoading(true);
+
+    try {
+      await requestPasswordReset(email.trim());
+      setResetEmailSent(true);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Password reset request failed. Please try again."
+      );
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   async function handleSubmit() {
     setError(null);
 
@@ -133,6 +171,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
     setError(null);
+    setResetEmailSent(false);
     setErrors({});
     setEmail("");
     setPassword("");
@@ -170,6 +209,12 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
         {error && (
           <div className="auth-error-banner" role="alert">
             {error}
+          </div>
+        )}
+
+        {resetEmailSent && mode === "login" && (
+          <div className="auth-success-banner" role="status">
+            If an account exists for this email, a password reset link has been sent.
           </div>
         )}
 
@@ -262,10 +307,11 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                 onChange={(e) => {
                   setEmail(e.target.value);
                   clearFieldError("email");
+                  setResetEmailSent(false);
                 }}
                 placeholder="you@example.com"
                 autoComplete="email"
-                disabled={loading}
+                disabled={loading || resetLoading}
                 aria-invalid={!!errors.email}
               />
               {errors.email && <span className="auth-field-error">{errors.email}</span>}
@@ -302,6 +348,19 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
                 <span className="auth-field-hint">Minimum 8 characters.</span>
               )}
             </div>
+
+            {mode === "login" && (
+              <div className="auth-forgot-row">
+                <button
+                  type="button"
+                  className="auth-forgot-btn"
+                  onClick={() => void handlePasswordReset()}
+                  disabled={loading || resetLoading}
+                >
+                  {resetLoading ? "Sending reset link..." : "Forgot password?"}
+                </button>
+              </div>
+            )}
           </section>
 
           {mode === "register" && (

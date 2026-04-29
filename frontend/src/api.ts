@@ -208,3 +208,13 @@ export async function getWellbeingInsights(userId: number): Promise<WellbeingIns
   const data = await handleResponse<{ insights: WellbeingInsight[] }>(response);
   return data.insights;
 }
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+
+  return handleResponse<void>(response);
+}
