@@ -13,7 +13,16 @@ branch_labels = None
 depends_on = None
 
 
+def _table_exists(table_name: str) -> bool:
+    import sqlalchemy as sa
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    return table_name in inspector.get_table_names()
+
+
 def upgrade() -> None:
+    if _table_exists("wellbeing_daily_metrics"):
+        return
     op.create_table(
         "wellbeing_daily_metrics",
         sa.Column("id", sa.Integer(), primary_key=True, index=True),
