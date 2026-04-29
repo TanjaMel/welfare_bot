@@ -16,6 +16,7 @@ import ChatWindow from "./components/ChatWindow";
 import LoginPage from "./components/LoginPage";
 import CareContactForm from "./components/CareContactForm";
 import WellbeingPanel from "./components/WellbeingPanel";
+import AdminDashboard from "./components/AdminDashboard";
 import logoUrl from "./assets/logo.png";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
@@ -108,7 +109,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<"chat" | "trends">("chat");
+  const [activeView, setActiveView] = useState<"chat" | "trends" | "admin">("chat");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const latestRisk = useMemo(() => (riskAnalyses.length > 0 ? riskAnalyses[0] : null), [riskAnalyses]);
@@ -353,6 +354,18 @@ export default function App() {
             >
               Your wellbeing trends
             </button>
+
+            {currentUserRole === "admin" && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === "admin"}
+                className={`top-tab ${activeView === "admin" ? "active" : ""}`}
+                onClick={() => setActiveView("admin")}
+              >
+                Admin Dashboard
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -560,10 +573,24 @@ export default function App() {
             >
               Your wellbeing trends
             </button>
+
+            {currentUserRole === "admin" && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === "admin"}
+                className={activeView === "admin" ? "active" : ""}
+                onClick={() => setActiveView("admin")}
+              >
+                Admin Dashboard
+              </button>
+            )}
           </div>
 
           {activeView === "trends" && userId ? (
             <WellbeingPanel userId={userId} />
+          ) : activeView === "admin" && currentUserRole === "admin" ? (
+            <AdminDashboard />
           ) : (
             <ChatWindow
               title="Welfare Bot Chat"

@@ -195,14 +195,14 @@ def get_admin_dashboard(
 
     # Users active today
     active_today_ids = set(
-        db.query(ConversationMessage.user_id)
-        .filter(
-            ConversationMessage.user_id.in_(user_ids),
-            ConversationMessage.created_at >= today_start,
-        )
-        .distinct()
-        .scalars()
-        .all()
+    row[0] for row in
+    db.query(ConversationMessage.user_id)
+    .filter(
+        ConversationMessage.user_id.in_(user_ids),
+        ConversationMessage.created_at >= today_start,
+    )
+    .distinct()
+    .all()
     )
 
     # Average wellbeing score (from daily metrics, last 7 days)
@@ -281,10 +281,10 @@ def get_admin_dashboard(
 
     heatmap = []
     for i in range(days):
-        d = (window_start.date() + timedelta(days=i)).strftime("%Y-%m-%d")
+        d = (window_start + timedelta(days=i)).strftime("%Y-%m-%d")
         counts = heatmap_by_date.get(d, {})
         heatmap.append(RiskHeatmapPoint(
-            date=(window_start.date() + timedelta(days=i)).strftime("%b %d"),
+            date=(window_start + timedelta(days=i)).strftime("%b %d"),
             critical=counts.get("critical", 0),
             high=counts.get("high", 0),
             medium=counts.get("medium", 0),

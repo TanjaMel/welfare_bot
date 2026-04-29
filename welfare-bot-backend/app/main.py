@@ -1,22 +1,56 @@
+import os
 from pathlib import Path
-
+ 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-
+ 
 from app.api.v1.api import api_router
 from app.db.base import Base
-from app.db.session import engine
-
+from app.db.session import engine, SessionLocal
+from app.db.models.user import User
+from app.services.auth_service import hash_password
+ 
 # Auto-create all tables on startup
 Base.metadata.create_all(bind=engine)
-
+ 
+ 
+def create_admin_if_not_exists():
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    admin_phone = os.getenv("ADMIN_PHONE", "+358000000000")
+ 
+    if not admin_email or not admin_password:
+        return  # skip if env vars not configured
+ 
+    db = SessionLocal()
+    try:
+        if not db.query(User).filter(User.email == admin_email).first():
+            admin = User(
+                first_name="Admin",
+                last_name="User",
+                phone_number=admin_phone,
+                email=admin_email,
+                password_hash=hash_password(admin_password),
+                role="admin",
+                is_active=True,
+            )
+            db.add(admin)
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+ 
+ 
+create_admin_if_not_exists()
+ 
 app = FastAPI(
     title="Welfare Bot API",
     version="0.1.0",
 )
-
+ 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,24 +58,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+ 
 app.include_router(api_router, prefix="/api/v1")
-
-
+ 
+ 
 # Serve React frontend
 POSSIBLE_STATIC_DIRS = [
     Path(__file__).resolve().parent / "static",  # app/static
     Path("/app/static"),                         # Railway absolute path
     Path.cwd() / "static",                       # cwd/static
 ]
-
+ 
 static_dir: Path | None = None
-
+ 
 for path in POSSIBLE_STATIC_DIRS:
     if path.exists() and (path / "index.html").exists():
         static_dir = path
         break
-
+ 
+ 
 
 if static_dir:
     assets_dir = static_dir / "assets"
@@ -116,3 +151,4 @@ else:
             "message": "Welfare Bot backend is running",
             "static_checked": checked,
         }
+
