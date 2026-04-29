@@ -1,343 +1,172 @@
-# Welfare Bot
+Welfare Bot
 
-**AI-powered wellbeing assistant for elderly people living independently**
+AI-powered full-stack system for proactive elderly wellbeing monitoring
 
-Welfare Bot is a conversational AI system that proactively checks in with elderly users, detects early signs of risk through natural language, and alerts care contacts when intervention may be needed.
+Welfare Bot is a production-style full-stack application that combines conversational AI, backend data pipelines, and machine learning to detect early signs of decline in elderly users living independently.
 
-The goal is simple: detect problems early — before they become emergencies.
+The system is designed as a scalable architecture — not just a chatbot — with clear separation between API, services, ML layer, and frontend.
 
----
-
-## Live Demo
+Live Demo
 
 https://welfarebot-production.up.railway.app
 
----
 ## Screenshots
 
 ### Registration
-
-![Registration](frontend/public/screenshots/register.png)
+![Registration](docs/images/00_register_page.png)
 
 ---
 
 ### Login
-
-![Login](frontend/public/screenshots/login.png)
+![Login](docs/images/01_login_page.png)
 
 ---
 
-### Chat
-Core interaction: natural conversation with risk-aware responses.
+### Finnish conversation — daily check-in
+The bot greets the user in Finnish and asks about their night.
 
-![Chat](frontend/public/screenshots/chat.png)
+![Chat opening](docs/images/02_chat_opening_finnish.png)
+
+---
+
+### Risk detection in action
+User mentions pain and poor sleep — bot detects signals and responds with concern.
+
+![Risk detection](docs/images/03_chat_risk_detection.png)
+
+---
 
 ### Wellbeing trends
+7-day trend chart with daily scores and soft insights.
 
-![Wellbeing trends](frontend/public/screenshots/trends.png)
-
----
-
-## The Problem
-
-Elderly people living alone face a significant risk of silent deterioration:
-
-* missed meals and dehydration
-* poor sleep and fatigue
-* loneliness and emotional decline
-* falls or medical symptoms that go unnoticed
-
-In Finland, a large number of elderly individuals live independently without continuous supervision.
-
-Existing solutions are limited:
-
-* they require active user action (panic buttons)
-* family members cannot monitor continuously
-* scheduled care calls are infrequent and rigid
-
-As a result, many issues are detected too late.
+![Wellbeing trends](docs/images/04_wellbeing_trends.png)
 
 ---
 
-## The Solution
+### API documentation
+Full REST API with 30+ endpoints.
 
-Welfare Bot introduces a proactive AI assistant that:
-
-* initiates conversations automatically
-* understands natural language input
-* detects risk signals in real time
-* adapts communication style based on severity
-* alerts care contacts when necessary
-
-All of this works without requiring new hardware or technical skills from the user.
+![API docs](docs/images/05_api_docs.png)
 
 ---
 
-## Core Features
-
-### Conversational Check-ins
-
-* Daily interaction (morning, afternoon, evening)
-* Natural, human-like dialogue
-* Multilingual support (Finnish, English, Swedish)
-
----
-
-### Risk Detection Engine
-
-The system analyzes user messages and detects signals related to:
-
-* sleep quality
-* food and hydration
-* physical pain or illness
-* emotional state
-* falls and acute symptoms
-
-Risk levels:
-
-* Low
-* Medium
-* High
-* Critical
-
-The assistant adapts its tone accordingly:
-
-* low risk → conversational
-* high risk → direct and safety-focused
-* critical risk → immediate action guidance
-
----
-
-### Wellbeing Analytics
-
-* Daily aggregated wellbeing score
-
-* Based on:
-
-  * mood
-  * sleep
-  * food
-  * hydration
-  * medication
-  * social activity
-
-* Trend visualization for:
-
-  * 7 / 14 / 30 days
-
-Results are presented as human-readable insights rather than raw numerical data.
-
----
-
-### Care Contact System
-
-* Store contact details for family or caregivers
-* Define notification preferences
-* System flags when contact should be alerted
-
----
-
-### Voice Interface
-
-* Speech-to-text using Whisper
-* Text-to-speech responses
-* Designed for accessibility and ease of use
-
----
-
-## Demo Flow
-
-1. Register a new user
-2. Start a conversation
-3. Send a message (e.g. "I haven't eaten today")
-4. Observe risk detection
-5. Check the wellbeing panel
-
----
-
-## Architecture
-
-```
-User (Browser)
-        │
-        ▼
-React Frontend (Vite)
-        │
-        ▼
-FastAPI Backend
-        │
- ┌──────┴────────┐
- ▼               ▼
-PostgreSQL     OpenAI API
-               (GPT / Whisper / TTS)
-```
-
----
-
-## Tech Stack
-
-### Backend
-
-* Python 3.11
-* FastAPI
-* PostgreSQL
-* SQLAlchemy ORM
-* Alembic migrations
-* JWT authentication (PyJWT + bcrypt)
-
-### AI
-
-* GPT-4o-mini (conversation)
-* Whisper (speech-to-text)
-* Text-to-speech (OpenAI TTS)
-
-### Frontend
-
-* React 18
-* TypeScript
-* Vite
-* Custom CSS (no UI framework)
-
-### DevOps
-
-* Docker (multi-stage build)
-* Railway deployment
-
----
-
-## Project Structure
-
-```
-welfare-bot/
-├── Dockerfile
-├── welfare-bot-backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── services/
-│   │   ├── db/models/
-│   │   └── integrations/
-└── frontend/
-    └── src/
-        ├── components/
-        ├── api.ts
-        └── App.tsx
-```
-
----
-
-## Risk Engine Design
-
-The system uses a hybrid approach:
-
-### Rule-based engine
-
-* deterministic
-* fast
-* explainable
-
-### LLM-based layer
-
-* natural conversation
-* contextual understanding
-
-This separation ensures both reliability and flexibility.
-
----
-
-## Wellbeing Scoring Model
-
-| Component       | Weight |
-| --------------- | ------ |
-| Mood            | 25%    |
-| Sleep           | 25%    |
-| Food            | 20%    |
-| Hydration       | 15%    |
-| Medication      | 10%    |
-| Social activity | 5%     |
-
-The final score combines structured check-in data and detected risk signals.
-
----
-
-## Security and Ethics
-
-* Explicit user consent is required during registration
-* Sensitive data is handled carefully
-* AI provides support, not medical diagnosis
-* The system avoids making clinical decisions
-
----
-
-## Local Development
-
-### Start database
-
-```bash
-docker-compose up -d
-```
-
-### Backend
-
-```bash
-cd welfare-bot-backend
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
----
-
-## Deployment
-
-* Single Docker container (frontend + backend)
-* Hosted on Railway
-* Automatic deployment from GitHub
-
----
-
-## Environment Variables
-
-| Variable       | Description                  |
-| -------------- | ---------------------------- |
-| DATABASE_URL   | PostgreSQL connection string |
-| OPENAI_API_KEY | OpenAI API key               |
-| SECRET_KEY     | JWT signing secret           |
-
----
-
-## Roadmap
-
-* Email and SMS alerts
-* Admin dashboard for care workers
-* Conversation memory between sessions
-* Medication reminders
-* Email verification
-* Password reset
-
----
-
-## Target Users
-
-### Elderly users
-
-* daily support through conversation
-* simple and accessible interaction
-
-### Family members
-
-* passive monitoring
-* early alerts
-
-### Care organizations
-
-* scalable monitoring
-* early intervention
-
+### Test suite — 123 passing
+![Test results](docs/images/06_test_results.png)
+
+Architecture (Fullstack Focus)
+Frontend (React + TypeScript)
+        ↓
+API Layer (FastAPI)
+        ↓
+Service Layer (Business Logic)
+        ↓
+Data Layer (PostgreSQL)
+        ↓
+ML Layer (scikit-learn + AI models)
+Key architectural decisions
+Layered backend architecture (API → services → DB)
+Stateless API with JWT authentication
+Background processing via scheduler (APScheduler)
+Separate ML pipeline (not blocking API requests)
+Frontend fully decoupled via REST API
+Core Components
+Backend (FastAPI)
+REST API with modular endpoints:
+auth
+conversations
+wellbeing
+anomaly detection
+admin dashboard
+SQLAlchemy ORM + Alembic migrations
+JWT authentication
+Service Layer
+
+Encapsulated business logic:
+
+risk_service — hybrid rule + LLM risk detection
+aggregation_pipeline — daily wellbeing scoring
+anomaly_detector — statistical detection
+ml_anomaly_model — IsolationForest model
+data_quality — validation & monitoring
+Data Layer
+
+Main entities:
+
+users
+conversation_messages
+daily_checkins
+risk_analyses
+wellbeing_daily_metrics
+care_contacts
+
+Supports time-series analytics and personalization.
+
+ML Layer
+IsolationForest (per-user anomaly detection)
+Feature engineering (10 features)
+StandardScaler preprocessing
+Hyperparameter tuning
+Evaluation metrics (precision / recall / F1)
+
+Additional:
+
+Z-score anomaly detection
+Trend slope analysis
+Frontend (React + TypeScript)
+SPA built with Vite
+Component-based architecture
+API-driven state
+
+Features:
+
+Chat interface
+Wellbeing analytics
+Auth system
+Admin dashboard
+Key Features
+Conversational AI check-ins
+Risk detection (rule-based + LLM)
+Wellbeing scoring system
+ML anomaly detection
+Data quality monitoring
+Admin dashboard
+Care contact system
+Tech Stack
+
+Backend
+
+FastAPI
+PostgreSQL
+SQLAlchemy
+Alembic
+APScheduler
+
+AI / ML
+
+OpenAI (GPT-4o-mini, Whisper, TTS)
+scikit-learn (IsolationForest)
+
+Frontend
+
+React
+TypeScript
+Vite
+
+DevOps
+
+Docker
+Railway
+Testing
+120+ automated tests
+Covers:
+ML models
+pipelines
+API
+scheduler
+pytest app/tests/
+What this project demonstrates
+Full-stack system design
+Production-style backend architecture
+Real ML integration
+Data pipeline thinking
+Scalable application structure
