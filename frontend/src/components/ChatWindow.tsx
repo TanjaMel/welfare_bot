@@ -12,14 +12,10 @@ type Props = {
   userInitial?: string;
 };
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname !== "localhost"
-    ? "/api/v1"
-    : "/api/v1";
+const API_BASE = "/api/v1";
 
 function formatTime(value?: string | null): string {
   if (!value) return "";
-  // Ensure UTC parsing by appending Z if no timezone info present
   const normalized = value.endsWith("Z") || value.includes("+") ? value : value + "Z";
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return "";
@@ -97,15 +93,12 @@ export default function ChatWindow({
 
   useEffect(() => {
     if (!voiceEnabled) return;
-
     if (messages.length <= prevMessagesLengthRef.current) {
       prevMessagesLengthRef.current = messages.length;
       return;
     }
-
     prevMessagesLengthRef.current = messages.length;
     const last = messages[messages.length - 1];
-
     if (last?.role === "assistant" && last.content) {
       void speakText(last.content, last.id);
     }
@@ -123,10 +116,7 @@ export default function ChatWindow({
 
   async function speakText(text: string, messageId?: number) {
     if (!text.trim()) return;
-
-    // Always stop any current audio before starting new one
     stopSpeaking();
-
     setIsSpeaking(true);
     setSpeakingMessageId(messageId ?? null);
 
@@ -145,7 +135,9 @@ export default function ChatWindow({
 
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
+      const audio = new Audio();
+      audio.src = audioUrl;
+      audio.preload = "auto";
 
       audioRef.current = audio;
       audio.onended = () => {
@@ -159,7 +151,14 @@ export default function ChatWindow({
         URL.revokeObjectURL(audioUrl);
       };
 
-      await audio.play();
+      audio.load();
+      try {
+        await audio.play();
+      } catch {
+        // Autoplay blocked — user needs to tap Play manually
+        setIsSpeaking(false);
+        setSpeakingMessageId(null);
+      }
     } catch {
       setIsSpeaking(false);
       setSpeakingMessageId(null);
@@ -168,7 +167,6 @@ export default function ChatWindow({
 
   async function startRecording() {
     setRecordingError(null);
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
@@ -180,7 +178,6 @@ export default function ChatWindow({
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
-
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
@@ -208,7 +205,6 @@ export default function ChatWindow({
     try {
       const token = localStorage.getItem("access_token");
       const formData = new FormData();
-
       formData.append("audio", audioBlob, "recording.webm");
       formData.append("language", language === "auto" ? "fi" : language);
 
@@ -235,10 +231,8 @@ export default function ChatWindow({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-
     const text = input.trim();
     if (!text || loading) return;
-
     try {
       await onSend(text);
       setInput("");
@@ -254,13 +248,9 @@ export default function ChatWindow({
           <h1 className="chat-title">{title}</h1>
           <p className="chat-subtitle">{subtitle}</p>
         </div>
-
         <button
           className={`voice-toggle-btn ${voiceEnabled ? "active" : ""}`}
-          onClick={() => {
-            setVoiceEnabled(!voiceEnabled);
-            stopSpeaking();
-          }}
+          onClick={() => { setVoiceEnabled(!voiceEnabled); stopSpeaking(); }}
           type="button"
         >
           <span className={`voice-dot ${voiceEnabled ? "active" : ""}`} />
@@ -274,9 +264,7 @@ export default function ChatWindow({
       <div className="messages-box">
         {!hasMessages ? (
           <div className="empty-state">
-            <div className="empty-state-mark">
-              <BotMark />
-            </div>
+            <div className="empty-state-mark"><BotMark /></div>
             <h3>No messages yet</h3>
             <p>Start the conversation below.</p>
           </div>
@@ -288,19 +276,10 @@ export default function ChatWindow({
 
             return (
               <div key={message.id} className={`message-row ${isUser ? "user" : "assistant"}`}>
-                {!isUser && (
-                  <div className="msg-avatar bot">
-                    <BotMark />
-                  </div>
-                )}
+                {!isUser && <div className="msg-avatar bot"><BotMark /></div>}
 
                 <div className={`message-bubble ${isUser ? "user" : "assistant"} ${riskClass}`}>
-                  {message.risk_level && isUser && (
-                    <div className={`message-risk-pill ${riskClass}`}>
-                      Risk: {message.risk_level}
-                      {typeof message.risk_score === "number" ? ` · score ${message.risk_score}` : ""}
-                    </div>
-                  )}
+
 
                   <div className="message-content">{message.content || (!isUser ? "..." : "")}</div>
 
@@ -329,7 +308,6 @@ export default function ChatWindow({
             );
           })
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
@@ -345,17 +323,8 @@ export default function ChatWindow({
           title={isRecording ? "Stop recording" : "Start voice input"}
         >
           <svg viewBox="0 0 24 24" fill="none">
-            <path
-              d="M12 15C10.3431 15 9 13.6569 9 12V6C9 4.34315 10.3431 3 12 3C13.6569 3 15 4.34315 15 6V12C15 13.6569 13.6569 15 12 15Z"
-              stroke="currentColor"
-              strokeWidth="1.8"
-            />
-            <path
-              d="M18 11.5C18 14.8137 15.3137 17.5 12 17.5C8.68629 17.5 6 14.8137 6 11.5"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
+            <path d="M12 15C10.3431 15 9 13.6569 9 12V6C9 4.34315 10.3431 3 12 3C13.6569 3 15 4.34315 15 6V12C15 13.6569 13.6569 15 12 15Z" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M18 11.5C18 14.8137 15.3137 17.5 12 17.5C8.68629 17.5 6 14.8137 6 11.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             <path d="M12 17.5V21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
           <span className="mic-label">{isRecording ? "Recording" : "Voice"}</span>
