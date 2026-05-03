@@ -17,8 +17,8 @@ import LoginPage from "./components/LoginPage";
 import CareContactForm from "./components/CareContactForm";
 import WellbeingPanel from "./components/WellbeingPanel";
 import AdminDashboard from "./components/AdminDashboard";
-import logoUrl from "./assets/logo.png";
 import ResetPasswordPage from "./components/ResetPasswordPage";
+import logoUrl from "./assets/logo.png";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
@@ -73,10 +73,8 @@ function storeUserId(id: number) {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem("access_token"));
-  const [_users, _setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("Loading...");
-  const [_userLanguage, _setUserLanguage] = useState<string>("fi");
   const [currentUserRole, setCurrentUserRole] = useState<string>("user");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [riskAnalyses, setRiskAnalyses] = useState<RiskAnalysis[]>([]);
@@ -94,7 +92,6 @@ export default function App() {
   function applyUserMeta(user: User) {
     setUserId(user.id);
     setUserName([user.first_name, user.last_name].filter(Boolean).join(" "));
-    _setUserLanguage(user.language || "fi");
     storeUserId(user.id);
   }
 
@@ -143,7 +140,6 @@ export default function App() {
       const role = currentUser.role ?? "user";
       setCurrentUserRole(role);
 
-      // Admin lands directly on the dashboard — no access to individual chats
       if (role === "admin") {
         setActiveView("admin");
       }
@@ -152,11 +148,9 @@ export default function App() {
 
       if (role === "admin") {
         const allUsers = await getUsers();
-        _setUsers(allUsers);
         const storedId = getStoredUserId();
         activeUser = storedId ? allUsers.find((u) => u.id === storedId) ?? allUsers[0] : allUsers[0];
       } else {
-        setUsers([currentUser]);
         activeUser = currentUser;
       }
 
@@ -169,7 +163,6 @@ export default function App() {
 
       applyUserMeta(activeUser);
 
-      // Only load conversation data for non-admin users
       if (role !== "admin") {
         await loadConversationData(activeUser.id);
       }
@@ -257,7 +250,6 @@ export default function App() {
     }
   }
 
-
   async function handleClearChat() {
     if (!userId) return;
     try {
@@ -276,7 +268,7 @@ export default function App() {
     if (isAuthenticated) void bootstrap();
   }, [isAuthenticated]);
 
-  
+  // Handle password reset link
   const resetToken = new URLSearchParams(window.location.search).get("token");
   if (window.location.pathname === "/reset-password" && resetToken) {
     return (
@@ -329,7 +321,6 @@ export default function App() {
           </button>
 
           <div className="top-tabs" role="tablist" aria-label="Main navigation">
-            {/* Chat and Trends only visible for regular users — not admins */}
             {!isAdmin && (
               <button
                 type="button"
@@ -385,7 +376,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Sidebar sections only for regular users */}
           {!isAdmin && (
             <>
               <section className="sidebar-section">
