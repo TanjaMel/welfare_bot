@@ -4,10 +4,6 @@ app/api/v1/endpoints/admin_dashboard.py
 Population-level analytics for care workers and admins.
 Returns aggregated data across all users — never exposes individual
 clinical scores directly, always with soft labels.
-
-Mount in api.py:
-    from app.api.v1.endpoints.admin_dashboard import router as admin_router
-    api_router.include_router(admin_router, prefix="/admin", tags=["Admin Dashboard"])
 """
 from __future__ import annotations
 
@@ -16,7 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, case
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -37,10 +33,11 @@ class UserRiskRow(BaseModel):
     name: str
     latest_risk_level: str
     latest_risk_score: int
-    trend: str          # "improving" | "stable" | "worsening" | "no_data"
+    trend: str
     last_active: Optional[str]
     days_since_contact: int
-    alert: bool         # True if needs attention today
+    alert: bool
+    alert_reason: str  # Human-readable reason for alert
 
     class Config:
         from_attributes = True
@@ -78,7 +75,6 @@ class AdminDashboardResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _risk_trend(recent_scores: list[int]) -> str:
-    """Compute trend from a list of recent risk scores (oldest first)."""
     if len(recent_scores) < 2:
         return "no_data"
     first_half = recent_scores[:len(recent_scores) // 2]
@@ -95,17 +91,31 @@ def _risk_trend(recent_scores: list[int]) -> str:
 def _days_since(dt: Optional[datetime]) -> int:
     if dt is None:
         return 999
-    if dt.tzinfo is not None:
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
-    else:
-        now = datetime.utcnow()
-        dt = dt.replace(tzinfo=None)
+    now = datetime.utcnow()
     return (now.replace(tzinfo=None) - dt.replace(tzinfo=None)).days
 
 
+def _get_alert_reason(
+    risk_level: str,
+    trend: str,
+    days_since: int,
+) -> str:
+    """Return human-readable alert reason or empty string if no alert."""
+    if risk_level == "critical":
+        return "Critical risk — immediate attention required"
+    if risk_level == "high" and trend == "worsening":
+        return "High risk and worsening trend"
+    if risk_level == "high":
+        return "High risk signals detected"
+    if days_since >= 5:
+        return f"No contact for {days_since} days"
+    if days_since >= 3 and risk_level == "medium":
+        return f"Medium risk, no contact for {days_since} days"
+    return ""
+
+
 # ---------------------------------------------------------------------------
-# Endpoints
+# Endpoint
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -117,17 +127,16 @@ def get_admin_dashboard(
     days: int = Query(default=7, ge=1, le=30),
     db: Session = Depends(get_db),
 ):
-    """
-    Returns population-level wellbeing and risk analytics.
-    Requires admin role — enforced at the frontend; add auth dependency
-    when ready (see get_current_admin_user).
-    """
     today = date.today()
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     window_start = today - timedelta(days=days)
 
-    # All active users
-    users = db.query(User).filter(User.is_active == True).all()
+    # Active non-admin users only — admin accounts should not appear in care dashboard
+    users = (
+        db.query(User)
+        .filter(User.is_active == True, User.role != "admin")
+        .all()
+    )
     user_ids = [u.id for u in users]
     user_map = {u.id: u for u in users}
 
@@ -182,7 +191,7 @@ def get_admin_dashboard(
         scores_by_user.setdefault(ra.user_id, []).append(ra.risk_score or 0)
 
     # Last message time per user
-    last_msg_subq = (
+    last_msg_rows = (
         db.query(
             ConversationMessage.user_id,
             func.max(ConversationMessage.created_at).label("last_msg"),
@@ -191,21 +200,21 @@ def get_admin_dashboard(
         .group_by(ConversationMessage.user_id)
         .all()
     )
-    last_msg_map = {row.user_id: row.last_msg for row in last_msg_subq}
+    last_msg_map = {row.user_id: row.last_msg for row in last_msg_rows}
 
     # Users active today
     active_today_ids = set(
-    row[0] for row in
-    db.query(ConversationMessage.user_id)
-    .filter(
-        ConversationMessage.user_id.in_(user_ids),
-        ConversationMessage.created_at >= today_start,
-    )
-    .distinct()
-    .all()
+        row[0] for row in
+        db.query(ConversationMessage.user_id)
+        .filter(
+            ConversationMessage.user_id.in_(user_ids),
+            ConversationMessage.created_at >= today_start,
+        )
+        .distinct()
+        .all()
     )
 
-    # Average wellbeing score (from daily metrics, last 7 days)
+    # Average wellbeing score
     avg_score_result = (
         db.query(func.avg(WellbeingDailyMetrics.overall_wellbeing_score))
         .filter(
@@ -230,8 +239,15 @@ def get_admin_dashboard(
         risk_score = latest.risk_score if latest else 0
         trend = _risk_trend(recent_scores) if recent_scores else "no_data"
 
-        # Alert if: critical/high risk OR no contact in 2+ days
-        alert = risk_level in ("critical", "high") or days_since >= 2
+        # Improved alert logic — much more conservative thresholds
+        # Only alert if genuinely concerning:
+        # - Critical risk (always alert)
+        # - High risk AND worsening trend
+        # - High risk AND no contact for 2+ days
+        # - Any risk level AND no contact for 5+ days
+        # - Medium risk AND no contact for 3+ days
+        alert_reason = _get_alert_reason(risk_level, trend, days_since)
+        alert = bool(alert_reason)
 
         risk_counts[risk_level if risk_level in risk_counts else "no_data"] += 1
 
@@ -247,17 +263,18 @@ def get_admin_dashboard(
             last_active=last_active_str,
             days_since_contact=days_since,
             alert=alert,
+            alert_reason=alert_reason,
         ))
 
-    # Sort: alerts first, then by risk level severity, then by days since contact
+    # Sort: alerts first, then by risk severity, then by days since contact
     level_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "no_data": 4}
     user_rows.sort(key=lambda r: (
         0 if r.alert else 1,
         level_order.get(r.latest_risk_level, 4),
-        r.days_since_contact,
-    ), reverse=False)
+        -r.days_since_contact,
+    ))
 
-    # Heatmap — risk counts per day over window
+    # Heatmap
     heatmap_rows = (
         db.query(
             func.date(RiskAnalysis.created_at).label("day"),

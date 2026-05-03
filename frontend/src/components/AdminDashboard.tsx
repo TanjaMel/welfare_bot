@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 interface UserRiskRow {
   user_id: number;
@@ -9,6 +9,7 @@ interface UserRiskRow {
   last_active: string | null;
   days_since_contact: number;
   alert: boolean;
+  alert_reason: string;
 }
 
 interface PopulationSummary {
@@ -27,443 +28,334 @@ interface DashboardData {
   generated_at: string;
   summary: PopulationSummary;
   users: UserRiskRow[];
-  heatmap: {
-    date: string;
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-  }[];
+  heatmap: { date: string; critical: number; high: number; medium: number; low: number }[];
 }
 
 const API_BASE = "/api/v1";
 
-const RISK_CONFIG: Record<
-  string,
-  { label: string; className: string; priority: number }
-> = {
-  critical: { label: "Critical", className: "admin-risk-critical", priority: 1 },
-  high: { label: "High", className: "admin-risk-high", priority: 2 },
-  medium: { label: "Medium", className: "admin-risk-medium", priority: 3 },
-  low: { label: "Low", className: "admin-risk-low", priority: 4 },
-  no_data: { label: "No data", className: "admin-risk-none", priority: 5 },
+const RISK_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  critical: { label: "Critical",  color: "#dc2626", bg: "#fef2f2", border: "#fca5a5" },
+  high:     { label: "High",      color: "#ea580c", bg: "#fff7ed", border: "#fdba74" },
+  medium:   { label: "Medium",    color: "#ca8a04", bg: "#fefce8", border: "#fde047" },
+  low:      { label: "Low",       color: "#16a34a", bg: "#f0fdf4", border: "#86efac" },
+  no_data:  { label: "No data",   color: "#6b7280", bg: "#f9fafb", border: "#d1d5db" },
 };
 
-const TREND_LABEL: Record<string, string> = {
-  improving: "Improving",
-  worsening: "Worsening",
-  stable: "Stable",
-  no_data: "No trend",
+const TREND_CONFIG: Record<string, { icon: string; label: string; color: string }> = {
+  improving: { icon: "↑", label: "Improving", color: "#16a34a" },
+  worsening: { icon: "↓", label: "Worsening", color: "#dc2626" },
+  stable:    { icon: "→", label: "Stable",    color: "#6b7280" },
+  no_data:   { icon: "—", label: "No trend",  color: "#9ca3af" },
 };
 
-const TREND_SYMBOL: Record<string, string> = {
-  improving: "↑",
-  worsening: "↓",
-  stable: "→",
-  no_data: "—",
-};
+const AVATAR_COLORS = [
+  "#4F7DF3", "#7C3AED", "#059669", "#DC2626", "#D97706",
+  "#0891B2", "#BE185D", "#65A30D", "#9333EA", "#0284C7",
+];
 
-const RISK_REASON: Record<string, string> = {
-  critical: "Critical wellbeing signals detected. Immediate human follow-up is recommended.",
-  high: "High-risk signals detected. The user may need support today.",
-  medium: "Some concerns detected. Follow-up is recommended this week.",
-  low: "No immediate concerns detected.",
-  no_data: "No conversation data available yet.",
-};
+function getAvatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
 
-type FilterValue = "all" | "attention" | "critical" | "high" | "medium" | "low" | "no_data";
+function Avatar({ name }: { name: string }) {
+  const color = getAvatarColor(name);
+  const initial = name.charAt(0).toUpperCase();
+  return (
+    <div style={{
+      width: 40, height: 40, borderRadius: "50%",
+      background: color, color: "#fff",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 16, fontWeight: 700, flexShrink: 0,
+    }}>
+      {initial}
+    </div>
+  );
+}
 
 function RiskBadge({ level }: { level: string }) {
-  const cfg = RISK_CONFIG[level] ?? RISK_CONFIG.no_data;
-
+  const cfg = RISK_CONFIG[level] || RISK_CONFIG.no_data;
   return (
-    <span className={`admin-risk-badge ${cfg.className}`}>
-      <span className="admin-risk-dot" />
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color }} />
       {cfg.label}
     </span>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  sub,
-  tone = "default",
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  tone?: "default" | "danger" | "warning" | "success" | "neutral";
-}) {
+function TrendBadge({ trend }: { trend: string }) {
+  const cfg = TREND_CONFIG[trend] || TREND_CONFIG.no_data;
   return (
-    <article className={`admin-stat-card ${tone}`}>
-      <span className="admin-stat-label">{label}</span>
-      <strong className="admin-stat-value">{value}</strong>
-      {sub && <span className="admin-stat-sub">{sub}</span>}
-    </article>
+    <span style={{ color: cfg.color, fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
+      <span style={{ fontSize: 16 }}>{cfg.icon}</span>
+      <span style={{ fontSize: 11, color: "#9ca3af" }}>{cfg.label}</span>
+    </span>
   );
 }
 
-function getActionText(user: UserRiskRow): string {
-  if (user.latest_risk_level === "critical") return "Contact immediately";
-  if (user.latest_risk_level === "high") return "Call today";
-  if (user.days_since_contact >= 3) return "Schedule check-in";
-  if (user.latest_risk_level === "medium") return "Monitor this week";
-  return "No action needed";
-}
-
-function formatContactDays(days: number): string {
-  if (days === 999) return "Never";
-  if (days === 0) return "Today";
-  if (days === 1) return "1 day";
-  return `${days} days`;
+function StatCard({ label: title, value, sub, accent }: {
+  label: string; value: string | number; sub?: string; accent?: string
+}) {
+  return (
+    <div style={{
+      background: "#fff", borderRadius: 12, padding: "18px 20px",
+      border: "1px solid #e5e7eb",
+      borderTop: `3px solid ${accent || "#e5e7eb"}`,
+    }}>
+      <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 500, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: accent || "#111827", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
 }
 
 export default function AdminDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState(7);
+  const [filter, setFilter] = useState("all");
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
-  const [filter, setFilter] = useState<FilterValue>("attention");
 
   const fetchDashboard = useCallback(async () => {
-    setRefreshing(true);
+    setLoading(true);
     setError(null);
-
     try {
       const token = localStorage.getItem("access_token");
-
-      const response = await fetch(`${API_BASE}/admin/dashboard?days=7`, {
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+      const res = await fetch(`${API_BASE}/admin/dashboard?days=${period}`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-
-      if (!response.ok) {
-        throw new Error(`Dashboard request failed: ${response.status}`);
-      }
-
-      const json = (await response.json()) as DashboardData;
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard.");
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      setData(await res.json());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  }, []);
+  }, [period]);
 
-  useEffect(() => {
-    void fetchDashboard();
-  }, [fetchDashboard]);
+  useEffect(() => { void fetchDashboard(); }, [fetchDashboard]);
 
-  const alertUsers = useMemo(() => {
-    return data?.users.filter((user) => user.alert) ?? [];
-  }, [data]);
-
-  const filteredUsers = useMemo(() => {
-    if (!data) return [];
-
-    const users = [...data.users];
-
-    const filtered =
-      filter === "all"
-        ? users
-        : filter === "attention"
-          ? users.filter((user) => user.alert)
-          : users.filter((user) => user.latest_risk_level === filter);
-
-    return filtered.sort((a, b) => {
-      const aPriority = RISK_CONFIG[a.latest_risk_level]?.priority ?? 5;
-      const bPriority = RISK_CONFIG[b.latest_risk_level]?.priority ?? 5;
-
-      if (a.alert !== b.alert) return a.alert ? -1 : 1;
-      if (aPriority !== bPriority) return aPriority - bPriority;
-
-      return b.days_since_contact - a.days_since_contact;
-    });
-  }, [data, filter]);
-
-  if (loading) {
-    return (
-      <section className="admin-dashboard">
-        <div className="admin-state-card">
-          <div className="admin-loading-pulse" />
-          <h2>Loading dashboard</h2>
-          <p>Preparing population-level wellbeing overview...</p>
-        </div>
-      </section>
-    );
-  }
-
-  if (error) {
-    return (
-      <section className="admin-dashboard">
-        <div className="admin-state-card error">
-          <h2>Could not load dashboard</h2>
-          <p>{error}</p>
-          <button type="button" className="admin-primary-btn" onClick={() => void fetchDashboard()}>
-            Try again
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  if (!data) {
-    return (
-      <section className="admin-dashboard">
-        <div className="admin-state-card">
-          <h2>No dashboard data</h2>
-          <p>No population-level data is available yet.</p>
-        </div>
-      </section>
-    );
-  }
+  const alertUsers = data?.users.filter(u => u.alert) ?? [];
+  const filteredUsers = data ? (
+    filter === "all" ? data.users :
+    filter === "alert" ? alertUsers :
+    data.users.filter(u => u.latest_risk_level === filter)
+  ) : [];
 
   return (
-    <section className="admin-dashboard">
-      <header className="admin-hero">
-        <div>
-          <span className="admin-kicker">Care team overview</span>
-          <h1>Population wellbeing</h1>
-          <p>
-            Monitor risk levels, recent contact and users who may need human follow-up.
-          </p>
-        </div>
+    <div style={{ padding: "24px 28px", maxWidth: 1100, margin: "0 auto", fontFamily: "'DM Sans', 'Segoe UI', sans-serif", background: "#f8fafc", minHeight: "100vh" }}>
 
-        <div className="admin-hero-actions">
-          <span className="admin-updated">Updated {data.generated_at}</span>
-          <button
-            type="button"
-            className="admin-secondary-btn"
-            onClick={() => void fetchDashboard()}
-            disabled={refreshing}
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+          Care Team Overview
         </div>
-      </header>
-
-      <div className="admin-stats-grid">
-        <StatCard
-          label="Total users"
-          value={data.summary.total_users}
-          sub={`${data.summary.active_today} active today`}
-          tone="neutral"
-        />
-        <StatCard
-          label="Need attention"
-          value={data.summary.users_needing_attention}
-          sub="Follow-up recommended"
-          tone={data.summary.users_needing_attention > 0 ? "danger" : "success"}
-        />
-        <StatCard
-          label="Critical"
-          value={data.summary.critical_count}
-          sub="Immediate priority"
-          tone="danger"
-        />
-        <StatCard
-          label="High risk"
-          value={data.summary.high_count}
-          sub="Call today"
-          tone="warning"
-        />
-        <StatCard
-          label="Medium risk"
-          value={data.summary.medium_count}
-          sub="Monitor this week"
-          tone="neutral"
-        />
-        <StatCard
-          label="Avg wellbeing"
-          value={
-            data.summary.avg_wellbeing_score !== null
-              ? `${data.summary.avg_wellbeing_score}%`
-              : "—"
-          }
-          sub="7-day average"
-          tone="success"
-        />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: "#111827" }}>Population wellbeing</h1>
+            <p style={{ fontSize: 13, color: "#6b7280", margin: "4px 0 0" }}>
+              Monitor risk levels, recent contact and users who may need human follow-up.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "#9ca3af" }}>Updated {data?.generated_at}</span>
+            {[7, 14, 30].map(d => (
+              <button key={d} onClick={() => setPeriod(d)} style={{
+                padding: "4px 12px", borderRadius: 6, border: "none",
+                background: period === d ? "#111827" : "#e5e7eb",
+                color: period === d ? "#fff" : "#6b7280",
+                fontSize: 12, fontWeight: period === d ? 600 : 400, cursor: "pointer",
+              }}>{d}d</button>
+            ))}
+            <button onClick={fetchDashboard} disabled={loading} style={{
+              padding: "6px 14px", borderRadius: 8, border: "1px solid #e5e7eb",
+              background: "#fff", fontSize: 12, cursor: "pointer", color: "#374151",
+            }}>
+              {loading ? "Loading…" : "↻ Refresh"}
+            </button>
+          </div>
+        </div>
       </div>
 
-      {alertUsers.length > 0 && (
-        <section className="admin-section">
-          <div className="admin-section-header">
-            <div>
-              <span className="admin-section-kicker">Priority queue</span>
-              <h2>Needs attention</h2>
-            </div>
-            <span className="admin-count-pill">{alertUsers.length} users</span>
-          </div>
-
-          <div className="admin-alert-list">
-            {alertUsers.map((user) => {
-              const expanded = expandedUser === user.user_id;
-
-              return (
-                <article
-                  key={user.user_id}
-                  className={`admin-alert-card ${expanded ? "expanded" : ""}`}
-                >
-                  <button
-                    type="button"
-                    className="admin-alert-main"
-                    onClick={() =>
-                      setExpandedUser(expanded ? null : user.user_id)
-                    }
-                  >
-                    <div className="admin-user-main">
-                      <div className="admin-user-avatar">
-                        {user.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <strong>{user.name}</strong>
-                        <span>{RISK_REASON[user.latest_risk_level]}</span>
-                      </div>
-                    </div>
-
-                    <div className="admin-alert-meta">
-                      <RiskBadge level={user.latest_risk_level} />
-                      <span className={`admin-trend ${user.trend}`}>
-                        {TREND_SYMBOL[user.trend]} {TREND_LABEL[user.trend]}
-                      </span>
-                      <span className="admin-last-active">
-                        Last active: {user.last_active || "Never"}
-                      </span>
-                      <span
-                        className={`admin-contact-days ${
-                          user.days_since_contact >= 2 ? "late" : "ok"
-                        }`}
-                      >
-                        {formatContactDays(user.days_since_contact)}
-                      </span>
-                      <span className="admin-chevron">{expanded ? "▲" : "▼"}</span>
-                    </div>
-                  </button>
-
-                  {expanded && (
-                    <div className="admin-alert-details">
-                      <div>
-                        <span>Risk score</span>
-                        <strong>{user.latest_risk_score}/10</strong>
-                      </div>
-                      <div>
-                        <span>Trend</span>
-                        <strong>{TREND_LABEL[user.trend]}</strong>
-                      </div>
-                      <div>
-                        <span>Recommended action</span>
-                        <strong>{getActionText(user)}</strong>
-                      </div>
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        </section>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "12px 16px", color: "#dc2626", fontSize: 13, marginBottom: 20 }}>
+          {error}
+        </div>
       )}
 
-      <section className="admin-section">
-        <div className="admin-section-header">
-          <div>
-            <span className="admin-section-kicker">User monitoring</span>
-            <h2>All users</h2>
+      {data && (
+        <>
+          {/* Summary cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
+            <StatCard label="Total users" value={data.summary.total_users} sub={`${data.summary.active_today} active today`} />
+            <StatCard label="Need attention" value={data.summary.users_needing_attention}
+              accent={data.summary.users_needing_attention > 0 ? "#dc2626" : "#16a34a"}
+              sub={data.summary.users_needing_attention > 0 ? "Follow-up recommended" : "All clear"} />
+            <StatCard label="Critical" value={data.summary.critical_count} accent="#dc2626" sub="Immediate priority" />
+            <StatCard label="High risk" value={data.summary.high_count} accent="#ea580c" sub="Call today" />
+            <StatCard label="Medium risk" value={data.summary.medium_count} accent="#ca8a04" sub="Monitor this week" />
+            <StatCard label="Avg wellbeing" value={data.summary.avg_wellbeing_score !== null ? `${data.summary.avg_wellbeing_score}%` : "—"}
+              accent="#16a34a" sub="7-day average" />
           </div>
 
-          <div className="admin-filter-row">
-            {[
-              ["attention", "Needs attention"],
-              ["all", "All"],
-              ["critical", "Critical"],
-              ["high", "High"],
-              ["medium", "Medium"],
-              ["low", "Low"],
-              ["no_data", "No data"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`admin-filter-btn ${filter === value ? "active" : ""}`}
-                onClick={() => setFilter(value as FilterValue)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+          {/* Priority queue */}
+          {alertUsers.length > 0 && (
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#dc2626", letterSpacing: "0.1em", textTransform: "uppercase" }}>Priority Queue</div>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: "2px 0 0" }}>Needs attention</h2>
+                </div>
+                <span style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                  {alertUsers.length} users
+                </span>
+              </div>
 
-        <div className="admin-table-card">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Risk</th>
-                <th>Reason</th>
-                <th>Trend</th>
-                <th>Last active</th>
-                <th>Contact</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredUsers.map((user) => (
-                <tr key={user.user_id} className={user.alert ? "needs-attention" : ""}>
-                  <td>
-                    <div className="admin-table-user">
-                      <div className="admin-table-avatar">
-                        {user.name.charAt(0).toUpperCase()}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {alertUsers.map(u => (
+                  <div key={u.user_id}
+                    onClick={() => setExpandedUser(expandedUser === u.user_id ? null : u.user_id)}
+                    style={{
+                      background: "#fff", border: "1px solid #e5e7eb",
+                      borderLeft: "3px solid #ea580c",
+                      borderRadius: 10, padding: "14px 16px", cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <Avatar name={u.name} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: "#111827", fontSize: 14 }}>{u.name}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{u.alert_reason}</div>
                       </div>
-                      <strong>{user.name}</strong>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                        <RiskBadge level={u.latest_risk_level} />
+                        <TrendBadge trend={u.trend} />
+                        <span style={{ fontSize: 12, color: "#9ca3af" }}>Last active: {u.last_active || "Never"}</span>
+                        <span style={{
+                          fontSize: 12, fontWeight: 600,
+                          color: u.days_since_contact >= 5 ? "#dc2626" : u.days_since_contact >= 3 ? "#ea580c" : "#6b7280",
+                        }}>
+                          {u.days_since_contact === 999 ? "Never" : `${u.days_since_contact}d ago`}
+                        </span>
+                        <span style={{ color: "#9ca3af", fontSize: 12 }}>{expandedUser === u.user_id ? "▲" : "▼"}</span>
+                      </div>
                     </div>
-                  </td>
 
-                  <td>
-                    <RiskBadge level={user.latest_risk_level} />
-                  </td>
-
-                  <td className="admin-reason-cell">
-                    {RISK_REASON[user.latest_risk_level]}
-                  </td>
-
-                  <td>
-                    <span className={`admin-trend ${user.trend}`}>
-                      {TREND_SYMBOL[user.trend]} {TREND_LABEL[user.trend]}
-                    </span>
-                  </td>
-
-                  <td>{user.last_active || "Never"}</td>
-
-                  <td>
-                    <span
-                      className={`admin-contact-days ${
-                        user.days_since_contact >= 2 ? "late" : "ok"
-                      }`}
-                    >
-                      {formatContactDays(user.days_since_contact)}
-                    </span>
-                  </td>
-
-                  <td>
-                    <span className="admin-action-pill">{getActionText(user)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {filteredUsers.length === 0 && (
-            <div className="admin-empty-table">
-              No users match this filter.
+                    {expandedUser === u.user_id && (
+                      <div style={{ marginTop: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <div style={{ fontSize: 13, color: "#374151" }}>
+                          <strong>Risk level:</strong> <RiskBadge level={u.latest_risk_level} />
+                        </div>
+                        <div style={{ fontSize: 13, color: "#374151" }}>
+                          <strong>Trend:</strong> <TrendBadge trend={u.trend} />
+                        </div>
+                        <div style={{ fontSize: 13, color: "#374151" }}>
+                          <strong>Days since contact:</strong>{" "}
+                          {u.days_since_contact === 999 ? "Never contacted" : `${u.days_since_contact} days`}
+                        </div>
+                        <div style={{ fontSize: 13, color: "#374151" }}>
+                          <strong>Recommended action:</strong>{" "}
+                          {u.latest_risk_level === "critical" ? "Contact immediately" :
+                           u.latest_risk_level === "high" ? "Call today" :
+                           u.days_since_contact >= 5 ? "Schedule check-in call" :
+                           "Monitor closely"}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </div>
-      </section>
-    </section>
+
+          {alertUsers.length === 0 && (
+            <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "16px 20px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 20 }}>✓</span>
+              <div>
+                <div style={{ fontWeight: 600, color: "#16a34a" }}>All users within normal parameters</div>
+                <div style={{ fontSize: 13, color: "#6b7280" }}>No urgent follow-ups needed today.</div>
+              </div>
+            </div>
+          )}
+
+          {/* All users table */}
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", letterSpacing: "0.1em", textTransform: "uppercase" }}>User Monitoring</div>
+                <span style={{ fontWeight: 700, fontSize: 16, color: "#111827" }}>All users</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["all", "alert", "critical", "high", "medium", "low", "no_data"].map(f => (
+                  <button key={f} onClick={() => setFilter(f)} style={{
+                    padding: "3px 12px", borderRadius: 20,
+                    border: `1px solid ${filter === f ? "#111827" : "#e5e7eb"}`,
+                    background: filter === f ? "#111827" : "#fff",
+                    color: filter === f ? "#fff" : "#6b7280",
+                    fontSize: 11, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
+                  }}>
+                    {f === "alert" ? "Needs attention" : f === "no_data" ? "No data" : f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#f9fafb" }}>
+                    {["Name", "Risk", "Reason", "Trend", "Last active", "Days"].map(h => (
+                      <th key={h} style={{
+                        padding: "10px 16px", textAlign: "left",
+                        fontSize: 11, fontWeight: 600, color: "#6b7280",
+                        letterSpacing: "0.06em", textTransform: "uppercase",
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUsers.map(u => (
+                    <tr key={u.user_id} style={{
+                      borderBottom: "1px solid #f3f4f6",
+                      background: u.alert ? "#fffbeb" : "transparent",
+                    }}>
+                      <td style={{ padding: "12px 16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <Avatar name={u.name} />
+                          <span style={{ fontWeight: 600, color: "#111827" }}>{u.name}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: "12px 16px" }}><RiskBadge level={u.latest_risk_level} /></td>
+                      <td style={{ padding: "12px 16px", color: "#4b5563", fontSize: 12, maxWidth: 220 }}>
+                        {u.alert_reason || (
+                          <span style={{ color: "#9ca3af" }}>No immediate concerns detected.</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "12px 16px" }}><TrendBadge trend={u.trend} /></td>
+                      <td style={{ padding: "12px 16px", color: "#4b5563", fontSize: 12 }}>{u.last_active || "—"}</td>
+                      <td style={{ padding: "12px 16px" }}>
+                        <span style={{
+                          fontWeight: 600, fontSize: 12,
+                          color: u.days_since_contact >= 5 ? "#dc2626" :
+                                 u.days_since_contact >= 3 ? "#ea580c" : "#16a34a",
+                        }}>
+                          {u.days_since_contact === 999 ? "Never" : `${u.days_since_contact}d`}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

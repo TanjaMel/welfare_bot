@@ -31,12 +31,23 @@ function authHeaders(): Record<string, string> {
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
-    if (response.status === 401) {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("current_user");
-      window.location.reload();
+
+    // Parse JSON error detail if available
+    let message = `HTTP error ${response.status}`;
+    try {
+      const json = JSON.parse(text);
+      message = json.detail || json.message || message;
+    } catch {
+      message = text || message;
     }
-    throw new Error(text || `HTTP error ${response.status}`);
+
+    // Human-readable messages for common errors
+    if (response.status === 401) message = "Incorrect email or password. Please try again.";
+    if (response.status === 403) message = "Your account is inactive. Please contact support.";
+    if (response.status === 429) message = "Too many attempts. Please wait a moment and try again.";
+    if (response.status === 400 && message.includes("already registered")) message = "This email is already registered. Please sign in instead.";
+
+    throw new Error(message);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
