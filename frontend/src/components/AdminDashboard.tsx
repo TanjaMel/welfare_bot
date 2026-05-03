@@ -33,21 +33,6 @@ interface DashboardData {
 
 const API_BASE = "/api/v1";
 
-const RISK_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  critical: { label: "Critical",  color: "#dc2626", bg: "#fef2f2", border: "#fca5a5" },
-  high:     { label: "High",      color: "#ea580c", bg: "#fff7ed", border: "#fdba74" },
-  medium:   { label: "Medium",    color: "#ca8a04", bg: "#fefce8", border: "#fde047" },
-  low:      { label: "Low",       color: "#16a34a", bg: "#f0fdf4", border: "#86efac" },
-  no_data:  { label: "No data",   color: "#6b7280", bg: "#f9fafb", border: "#d1d5db" },
-};
-
-const TREND_CONFIG: Record<string, { icon: string; label: string; color: string }> = {
-  improving: { icon: "↑", label: "Improving", color: "#16a34a" },
-  worsening: { icon: "↓", label: "Worsening", color: "#dc2626" },
-  stable:    { icon: "→", label: "Stable",    color: "#6b7280" },
-  no_data:   { icon: "—", label: "No trend",  color: "#9ca3af" },
-};
-
 const AVATAR_COLORS = [
   "#4F7DF3", "#7C3AED", "#059669", "#DC2626", "#D97706",
   "#0891B2", "#BE185D", "#65A30D", "#9333EA", "#0284C7",
@@ -61,57 +46,44 @@ function getAvatarColor(name: string): string {
 
 function Avatar({ name }: { name: string }) {
   const color = getAvatarColor(name);
-  const initial = name.charAt(0).toUpperCase();
   return (
-    <div style={{
-      width: 40, height: 40, borderRadius: "50%",
-      background: color, color: "#fff",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: 16, fontWeight: 700, flexShrink: 0,
-    }}>
-      {initial}
+    <div className="admin-user-avatar" style={{ background: color }}>
+      {name.charAt(0).toUpperCase()}
     </div>
   );
 }
 
 function RiskBadge({ level }: { level: string }) {
-  const cfg = RISK_CONFIG[level] || RISK_CONFIG.no_data;
+  const cls = `admin-risk-badge admin-risk-${level === "no_data" ? "none" : level}`;
+  const labels: Record<string, string> = {
+    critical: "Critical", high: "High", medium: "Medium", low: "Low", no_data: "No data",
+  };
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5,
-      padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color }} />
-      {cfg.label}
+    <span className={cls}>
+      <span className="admin-risk-dot" />
+      {labels[level] ?? level}
     </span>
   );
 }
 
 function TrendBadge({ trend }: { trend: string }) {
-  const cfg = TREND_CONFIG[trend] || TREND_CONFIG.no_data;
+  const icons: Record<string, string> = {
+    improving: "↑", worsening: "↓", stable: "→", no_data: "—",
+  };
+  const labels: Record<string, string> = {
+    improving: "Improving", worsening: "Worsening", stable: "Stable", no_data: "No trend",
+  };
   return (
-    <span style={{ color: cfg.color, fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 4 }}>
-      <span style={{ fontSize: 16 }}>{cfg.icon}</span>
-      <span style={{ fontSize: 11, color: "#9ca3af" }}>{cfg.label}</span>
+    <span className={`admin-trend ${trend}`}>
+      {icons[trend] ?? "—"} {labels[trend] ?? trend}
     </span>
   );
 }
 
-function StatCard({ label: title, value, sub, accent }: {
-  label: string; value: string | number; sub?: string; accent?: string
-}) {
-  return (
-    <div style={{
-      background: "#fff", borderRadius: 12, padding: "18px 20px",
-      border: "1px solid #e5e7eb",
-      borderTop: `3px solid ${accent || "#e5e7eb"}`,
-    }}>
-      <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 500, marginBottom: 4 }}>{title}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: accent || "#111827", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
+function ContactDays({ days }: { days: number }) {
+  if (days === 999) return <span className="admin-contact-days late">Never</span>;
+  const cls = days >= 3 ? "late" : "ok";
+  return <span className={`admin-contact-days ${cls}`}>{days}d</span>;
 }
 
 export default function AdminDashboard() {
@@ -148,123 +120,147 @@ export default function AdminDashboard() {
     data.users.filter(u => u.latest_risk_level === filter)
   ) : [];
 
-  return (
-    <div style={{ padding: "24px 28px", maxWidth: 1100, margin: "0 auto", fontFamily: "'DM Sans', 'Segoe UI', sans-serif", background: "#f8fafc", minHeight: "100vh" }}>
+  const s = data?.summary;
 
-      {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
-          Care Team Overview
+  return (
+    <div className="admin-dashboard">
+
+      {/* Hero header */}
+      <div className="admin-hero">
+        <div>
+          <span className="admin-kicker">Care Team Overview</span>
+          <h1>Population wellbeing</h1>
+          <p>Monitor risk levels, recent contact and users who may need human follow-up.</p>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: "#111827" }}>Population wellbeing</h1>
-            <p style={{ fontSize: 13, color: "#6b7280", margin: "4px 0 0" }}>
-              Monitor risk levels, recent contact and users who may need human follow-up.
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: "#9ca3af" }}>Updated {data?.generated_at}</span>
+        <div className="admin-hero-actions">
+          <span className="admin-updated">Updated {data?.generated_at ?? "—"}</span>
+          <div style={{ display: "flex", gap: 8 }}>
             {[7, 14, 30].map(d => (
-              <button key={d} onClick={() => setPeriod(d)} style={{
-                padding: "4px 12px", borderRadius: 6, border: "none",
-                background: period === d ? "#111827" : "#e5e7eb",
-                color: period === d ? "#fff" : "#6b7280",
-                fontSize: 12, fontWeight: period === d ? 600 : 400, cursor: "pointer",
-              }}>{d}d</button>
+              <button
+                key={d}
+                className={`admin-filter-btn ${period === d ? "active" : ""}`}
+                onClick={() => setPeriod(d)}
+              >
+                {d}d
+              </button>
             ))}
-            <button onClick={fetchDashboard} disabled={loading} style={{
-              padding: "6px 14px", borderRadius: 8, border: "1px solid #e5e7eb",
-              background: "#fff", fontSize: 12, cursor: "pointer", color: "#374151",
-            }}>
-              {loading ? "Loading…" : "↻ Refresh"}
-            </button>
           </div>
+          <button className="admin-secondary-btn" onClick={fetchDashboard} disabled={loading}>
+            {loading ? "Loading…" : "↻ Refresh"}
+          </button>
         </div>
       </div>
 
+      {/* Error */}
       {error && (
-        <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "12px 16px", color: "#dc2626", fontSize: 13, marginBottom: 20 }}>
-          {error}
+        <div className="admin-state-card error" style={{ marginBottom: 20, padding: "16px 20px", textAlign: "left" }}>
+          <p>{error}</p>
         </div>
       )}
 
-      {data && (
+      {s && (
         <>
-          {/* Summary cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
-            <StatCard label="Total users" value={data.summary.total_users} sub={`${data.summary.active_today} active today`} />
-            <StatCard label="Need attention" value={data.summary.users_needing_attention}
-              accent={data.summary.users_needing_attention > 0 ? "#dc2626" : "#16a34a"}
-              sub={data.summary.users_needing_attention > 0 ? "Follow-up recommended" : "All clear"} />
-            <StatCard label="Critical" value={data.summary.critical_count} accent="#dc2626" sub="Immediate priority" />
-            <StatCard label="High risk" value={data.summary.high_count} accent="#ea580c" sub="Call today" />
-            <StatCard label="Medium risk" value={data.summary.medium_count} accent="#ca8a04" sub="Monitor this week" />
-            <StatCard label="Avg wellbeing" value={data.summary.avg_wellbeing_score !== null ? `${data.summary.avg_wellbeing_score}%` : "—"}
-              accent="#16a34a" sub="7-day average" />
+          {/* Stats grid */}
+          <div className="admin-stats-grid">
+            <div className="admin-stat-card neutral">
+              <span className="admin-stat-label">Total users</span>
+              <span className="admin-stat-value">{s.total_users}</span>
+              <span className="admin-stat-sub">{s.active_today} active today</span>
+            </div>
+            <div className={`admin-stat-card ${s.users_needing_attention > 0 ? "danger" : "success"}`}>
+              <span className="admin-stat-label">Need attention</span>
+              <span className="admin-stat-value">{s.users_needing_attention}</span>
+              <span className="admin-stat-sub">{s.users_needing_attention > 0 ? "Follow-up recommended" : "All clear"}</span>
+            </div>
+            <div className="admin-stat-card danger">
+              <span className="admin-stat-label">Critical</span>
+              <span className="admin-stat-value">{s.critical_count}</span>
+              <span className="admin-stat-sub">Immediate priority</span>
+            </div>
+            <div className="admin-stat-card warning">
+              <span className="admin-stat-label">High risk</span>
+              <span className="admin-stat-value">{s.high_count}</span>
+              <span className="admin-stat-sub">Call today</span>
+            </div>
+            <div className="admin-stat-card warning">
+              <span className="admin-stat-label">Medium risk</span>
+              <span className="admin-stat-value">{s.medium_count}</span>
+              <span className="admin-stat-sub">Monitor this week</span>
+            </div>
+            <div className="admin-stat-card success">
+              <span className="admin-stat-label">Avg wellbeing</span>
+              <span className="admin-stat-value">
+                {s.avg_wellbeing_score !== null ? `${s.avg_wellbeing_score}%` : "—"}
+              </span>
+              <span className="admin-stat-sub">7-day average</span>
+            </div>
           </div>
 
           {/* Priority queue */}
-          {alertUsers.length > 0 && (
-            <div style={{ marginBottom: 28 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          {alertUsers.length > 0 ? (
+            <div className="admin-section" style={{ marginBottom: 22 }}>
+              <div className="admin-section-header">
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#dc2626", letterSpacing: "0.1em", textTransform: "uppercase" }}>Priority Queue</div>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: "2px 0 0" }}>Needs attention</h2>
+                  <span className="admin-section-kicker">Priority Queue</span>
+                  <h2>Needs attention</h2>
                 </div>
-                <span style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
-                  {alertUsers.length} users
-                </span>
+                <span className="admin-count-pill">{alertUsers.length} users</span>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="admin-alert-list">
                 {alertUsers.map(u => (
-                  <div key={u.user_id}
-                    onClick={() => setExpandedUser(expandedUser === u.user_id ? null : u.user_id)}
-                    style={{
-                      background: "#fff", border: "1px solid #e5e7eb",
-                      borderLeft: "3px solid #ea580c",
-                      borderRadius: 10, padding: "14px 16px", cursor: "pointer",
-                    }}
+                  <div
+                    key={u.user_id}
+                    className={`admin-alert-card ${expandedUser === u.user_id ? "expanded" : ""}`}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <Avatar name={u.name} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, color: "#111827", fontSize: 14 }}>{u.name}</div>
-                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{u.alert_reason}</div>
+                    <button
+                      className="admin-alert-main"
+                      onClick={() => setExpandedUser(expandedUser === u.user_id ? null : u.user_id)}
+                    >
+                      <div className="admin-user-main">
+                        <Avatar name={u.name} />
+                        <div>
+                          <strong>{u.name}</strong>
+                          <span>{u.alert_reason}</span>
+                        </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                      <div className="admin-alert-meta">
                         <RiskBadge level={u.latest_risk_level} />
                         <TrendBadge trend={u.trend} />
-                        <span style={{ fontSize: 12, color: "#9ca3af" }}>Last active: {u.last_active || "Never"}</span>
-                        <span style={{
-                          fontSize: 12, fontWeight: 600,
-                          color: u.days_since_contact >= 5 ? "#dc2626" : u.days_since_contact >= 3 ? "#ea580c" : "#6b7280",
-                        }}>
-                          {u.days_since_contact === 999 ? "Never" : `${u.days_since_contact}d ago`}
+                        <span className="admin-last-active">
+                          Last active: {u.last_active ?? "Never"}
                         </span>
-                        <span style={{ color: "#9ca3af", fontSize: 12 }}>{expandedUser === u.user_id ? "▲" : "▼"}</span>
+                        <ContactDays days={u.days_since_contact} />
+                        <span className="admin-chevron">
+                          {expandedUser === u.user_id ? "▲" : "▼"}
+                        </span>
                       </div>
-                    </div>
+                    </button>
 
                     {expandedUser === u.user_id && (
-                      <div style={{ marginTop: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                        <div style={{ fontSize: 13, color: "#374151" }}>
-                          <strong>Risk level:</strong> <RiskBadge level={u.latest_risk_level} />
+                      <div className="admin-alert-details">
+                        <div>
+                          <span>Risk level</span>
+                          <strong><RiskBadge level={u.latest_risk_level} /></strong>
                         </div>
-                        <div style={{ fontSize: 13, color: "#374151" }}>
-                          <strong>Trend:</strong> <TrendBadge trend={u.trend} />
+                        <div>
+                          <span>Trend</span>
+                          <strong><TrendBadge trend={u.trend} /></strong>
                         </div>
-                        <div style={{ fontSize: 13, color: "#374151" }}>
-                          <strong>Days since contact:</strong>{" "}
-                          {u.days_since_contact === 999 ? "Never contacted" : `${u.days_since_contact} days`}
+                        <div>
+                          <span>Days since contact</span>
+                          <strong>
+                            {u.days_since_contact === 999 ? "Never contacted" : `${u.days_since_contact} days`}
+                          </strong>
                         </div>
-                        <div style={{ fontSize: 13, color: "#374151" }}>
-                          <strong>Recommended action:</strong>{" "}
-                          {u.latest_risk_level === "critical" ? "Contact immediately" :
-                           u.latest_risk_level === "high" ? "Call today" :
-                           u.days_since_contact >= 5 ? "Schedule check-in call" :
-                           "Monitor closely"}
+                        <div>
+                          <span>Recommended action</span>
+                          <strong>
+                            {u.latest_risk_level === "critical" ? "Contact immediately" :
+                             u.latest_risk_level === "high" ? "Call today" :
+                             u.days_since_contact >= 5 ? "Schedule check-in call" :
+                             "Monitor closely"}
+                          </strong>
                         </div>
                       </div>
                     )}
@@ -272,82 +268,65 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
-          )}
-
-          {alertUsers.length === 0 && (
-            <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "16px 20px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 20 }}>✓</span>
+          ) : (
+            <div className="admin-state-card" style={{ marginBottom: 22, padding: "24px 30px", textAlign: "left", display: "flex", alignItems: "center", gap: 16 }}>
+              <span style={{ fontSize: 24, color: "var(--success)" }}>✓</span>
               <div>
-                <div style={{ fontWeight: 600, color: "#16a34a" }}>All users within normal parameters</div>
-                <div style={{ fontSize: 13, color: "#6b7280" }}>No urgent follow-ups needed today.</div>
+                <h2 style={{ color: "var(--success)", fontSize: 16 }}>All users within normal parameters</h2>
+                <p style={{ marginTop: 4, fontSize: 13, color: "var(--text-soft)" }}>No urgent follow-ups needed today.</p>
               </div>
             </div>
           )}
 
           {/* All users table */}
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <div className="admin-table-card">
+            <div className="admin-section-header" style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", margin: 0 }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", letterSpacing: "0.1em", textTransform: "uppercase" }}>User Monitoring</div>
-                <span style={{ fontWeight: 700, fontSize: 16, color: "#111827" }}>All users</span>
+                <span className="admin-section-kicker" style={{ marginBottom: 2 }}>User Monitoring</span>
+                <span style={{ fontWeight: 700, fontSize: 16, color: "var(--primary-dark)" }}>All users</span>
               </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <div className="admin-filter-row">
                 {["all", "alert", "critical", "high", "medium", "low", "no_data"].map(f => (
-                  <button key={f} onClick={() => setFilter(f)} style={{
-                    padding: "3px 12px", borderRadius: 20,
-                    border: `1px solid ${filter === f ? "#111827" : "#e5e7eb"}`,
-                    background: filter === f ? "#111827" : "#fff",
-                    color: filter === f ? "#fff" : "#6b7280",
-                    fontSize: 11, fontWeight: 500, cursor: "pointer", textTransform: "capitalize",
-                  }}>
-                    {f === "alert" ? "Needs attention" : f === "no_data" ? "No data" : f}
+                  <button
+                    key={f}
+                    className={`admin-filter-btn ${filter === f ? "active" : ""}`}
+                    onClick={() => setFilter(f)}
+                  >
+                    {f === "alert" ? "Needs attention" : f === "no_data" ? "No data" : f.charAt(0).toUpperCase() + f.slice(1)}
                   </button>
                 ))}
               </div>
             </div>
 
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="admin-table">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#f9fafb" }}>
+                  <tr>
                     {["Name", "Risk", "Reason", "Trend", "Last active", "Days"].map(h => (
-                      <th key={h} style={{
-                        padding: "10px 16px", textAlign: "left",
-                        fontSize: 11, fontWeight: 600, color: "#6b7280",
-                        letterSpacing: "0.06em", textTransform: "uppercase",
-                      }}>{h}</th>
+                      <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredUsers.map(u => (
-                    <tr key={u.user_id} style={{
-                      borderBottom: "1px solid #f3f4f6",
-                      background: u.alert ? "#fffbeb" : "transparent",
-                    }}>
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="admin-empty-table">No users match this filter.</td>
+                    </tr>
+                  ) : filteredUsers.map(u => (
+                    <tr key={u.user_id} className={u.alert ? "needs-attention" : ""}>
+                      <td>
+                        <div className="admin-table-user">
                           <Avatar name={u.name} />
-                          <span style={{ fontWeight: 600, color: "#111827" }}>{u.name}</span>
+                          <strong>{u.name}</strong>
                         </div>
                       </td>
-                      <td style={{ padding: "12px 16px" }}><RiskBadge level={u.latest_risk_level} /></td>
-                      <td style={{ padding: "12px 16px", color: "#4b5563", fontSize: 12, maxWidth: 220 }}>
-                        {u.alert_reason || (
-                          <span style={{ color: "#9ca3af" }}>No immediate concerns detected.</span>
-                        )}
+                      <td><RiskBadge level={u.latest_risk_level} /></td>
+                      <td className="admin-reason-cell">
+                        {u.alert_reason || <span style={{ color: "var(--text-muted)" }}>No immediate concerns.</span>}
                       </td>
-                      <td style={{ padding: "12px 16px" }}><TrendBadge trend={u.trend} /></td>
-                      <td style={{ padding: "12px 16px", color: "#4b5563", fontSize: 12 }}>{u.last_active || "—"}</td>
-                      <td style={{ padding: "12px 16px" }}>
-                        <span style={{
-                          fontWeight: 600, fontSize: 12,
-                          color: u.days_since_contact >= 5 ? "#dc2626" :
-                                 u.days_since_contact >= 3 ? "#ea580c" : "#16a34a",
-                        }}>
-                          {u.days_since_contact === 999 ? "Never" : `${u.days_since_contact}d`}
-                        </span>
-                      </td>
+                      <td><TrendBadge trend={u.trend} /></td>
+                      <td className="admin-last-active">{u.last_active ?? "—"}</td>
+                      <td><ContactDays days={u.days_since_contact} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -355,6 +334,14 @@ export default function AdminDashboard() {
             </div>
           </div>
         </>
+      )}
+
+      {loading && !data && (
+        <div className="admin-state-card">
+          <div className="admin-loading-pulse" />
+          <h2>Loading dashboard…</h2>
+          <p>Fetching population data</p>
+        </div>
       )}
     </div>
   );
