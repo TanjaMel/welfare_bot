@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.api.deps_auth import get_current_user
@@ -15,6 +17,7 @@ from app.schemas.user import TokenResponse, UserLogin, UserRead, UserRegister
 from app.services.auth_service import create_access_token, hash_password, verify_password
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -55,7 +58,8 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse, summary="Login")
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == payload.email).first()
 
     if not user or not user.password_hash:
@@ -74,8 +78,8 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/forgot-password", summary="Request password reset")
-def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    # Always return same message to prevent email enumeration
+@limiter.limit("3/minute")
+def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     generic_response = {
         "message": "If an account with this email exists, a password reset link has been sent."
     }
@@ -84,7 +88,6 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
     if not user:
         return generic_response
 
-    # Generate secure token
     token = secrets.token_urlsafe(32)
 
     reset_token = PasswordResetToken(
@@ -96,20 +99,14 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
     db.add(reset_token)
     db.commit()
 
-    # Send email via SendGrid
     try:
         from app.services.notification_service import send_password_reset_email
         user_name = user.first_name or ""
-        sent = send_password_reset_email(
+        send_password_reset_email(
             to_email=user.email,
             reset_token=token,
             user_name=user_name,
         )
-        if not sent:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Password reset email could not be sent to %s", user.email
-            )
     except Exception as e:
         import logging
         logging.getLogger(__name__).error("Password reset email error: %s", e)

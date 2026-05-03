@@ -40,4 +40,4 @@ APScheduler==3.10.4
 email-validator==2.2.0
 
 scikit-learn==1.6.1
-sendgrid==6.11.0
+sendgrid==6.11.0slowapi==0.1.9
