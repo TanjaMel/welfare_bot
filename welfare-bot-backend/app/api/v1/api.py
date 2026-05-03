@@ -13,6 +13,10 @@ from app.api.v1.endpoints import (
 from app.api.v1.endpoints.admin_dashboard import router as admin_router
 from app.api.v1.endpoints.data_quality import router as dq_router
 from app.api.v1.endpoints.admin_report import router as report_router
+from app.api.v1.endpoints.alert_feedback import router as feedback_router
+from app.api.v1.endpoints.ml_insights import router as ml_router
+
+
 api_router = APIRouter()
 
 api_router.include_router(auth.router,          prefix="/auth",          tags=["auth"])
@@ -27,3 +31,5 @@ api_router.include_router(wellbeing.router,     prefix="/wellbeing",      tags=[
 api_router.include_router(admin_router,         prefix="/admin",          tags=["Admin Dashboard"])
 api_router.include_router(dq_router,            prefix="/admin/data-quality",         tags=["Data Quality"])
 api_router.include_router(report_router,        prefix="/admin",           tags=["Report"])
+api_router.include_router(feedback_router,      prefix="/admin",           tags=["ML Feedback"])
+api_router.include_router(ml_router,            prefix="/admin",           tags=["ML Insights"])

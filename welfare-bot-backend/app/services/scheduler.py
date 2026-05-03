@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.db.session import SessionLocal
 from app.services.aggregation_pipeline import AggregationPipeline
-
+from app.services.weekly_report import send_weekly_report
 logger = logging.getLogger(__name__)
 
 scheduler: Optional[BackgroundScheduler] = None
@@ -23,12 +23,13 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
 
     scheduler.add_job(
-        run_daily_aggregation,
-        trigger="cron",
-        hour=0,
-        minute=5,
-        id="daily_wellbeing_aggregation",
-        replace_existing=True,
+    send_weekly_report,
+    trigger="cron",
+    day_of_week="mon",
+    hour=8,
+    minute=0,
+    id="weekly_report",
+    replace_existing=True,
     )
 
     scheduler.add_job(
