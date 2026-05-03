@@ -18,6 +18,7 @@ import CareContactForm from "./components/CareContactForm";
 import WellbeingPanel from "./components/WellbeingPanel";
 import AdminDashboard from "./components/AdminDashboard";
 import logoUrl from "./assets/logo.png";
+import ResetPasswordPage from "./components/ResetPasswordPage";
 
 const USER_ID_STORAGE_KEY = "welfare-bot-user-id";
 
@@ -274,6 +275,17 @@ export default function App() {
   useEffect(() => {
     if (isAuthenticated) void bootstrap();
   }, [isAuthenticated]);
+
+  
+  const resetToken = new URLSearchParams(window.location.search).get("token");
+  if (window.location.pathname === "/reset-password" && resetToken) {
+    return (
+      <ResetPasswordPage
+        token={resetToken}
+        onSuccess={() => window.location.replace("/")}
+      />
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginPage onSuccess={() => setIsAuthenticated(true)} />;
