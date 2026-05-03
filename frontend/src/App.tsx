@@ -256,15 +256,6 @@ export default function App() {
     }
   }
 
-  async function handleUserChange(nextUserId: number) {
-    const selected = users.find((u) => u.id === nextUserId);
-    if (!selected) return;
-    setError(null);
-    setActiveView("admin");
-    setSidebarOpen(false);
-    setVisibleCount(30);
-    applyUserMeta(selected);
-  }
 
   async function handleClearChat() {
     if (!userId) return;

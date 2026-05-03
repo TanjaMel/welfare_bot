@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -19,18 +19,15 @@ from app.schemas.conversation import (
 from app.schemas.risk_analysis import RiskAnalysisResponse
 from app.schemas.notification import NotificationRead
 from app.services import risk_service
-from app.services.conversation_starter import get_opening_message, get_follow_up
+from app.services.conversation_starter import get_opening_message
 from app.services.memory_service import (
     get_memory_context,
     summarize_session,
-    should_summarize,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
-# GET /{user_id}/messages
 
 @router.get(
     "/{user_id}/messages",
@@ -46,8 +43,6 @@ def get_messages(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-# DELETE /{user_id}/messages
-
 @router.delete("/{user_id}/messages", status_code=204, summary="Delete User Messages")
 def delete_messages(user_id: int, db: Session = Depends(get_db)):
     db.query(ConversationMessage).filter(
@@ -55,8 +50,6 @@ def delete_messages(user_id: int, db: Session = Depends(get_db)):
     ).delete()
     db.commit()
 
-
-# GET /{user_id}/risk-analysis
 
 @router.get(
     "/{user_id}/risk-analysis",
@@ -72,8 +65,6 @@ def get_user_risk(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-# GET /{user_id}/notifications
-
 @router.get(
     "/{user_id}/notifications",
     response_model=List[NotificationRead],
@@ -87,7 +78,6 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-# POST /start
 
 @router.post(
     "/start",
@@ -130,8 +120,6 @@ def start_conversation(
     db.refresh(msg)
     return msg
 
-
-# POST /message
 
 @router.post(
     "/message",
@@ -217,7 +205,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         db.refresh(notif)
         notifications_out.append(NotificationRead.model_validate(notif).model_dump())
 
-    # 7. Count total messages today for daily limit
+    # 7. Count today's messages
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -230,13 +218,13 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         .count()
     )
 
-    # 8. Daily message limit — 20 messages per day
+    # 8. Daily limit
     if total_messages_today > 20:
         detected_lang = result.get("language", "fi")
         closing_messages = {
             "fi": "Olemme jutelleet paljon tänään. Olen iloinen, että jaoit ajatuksesi kanssani. Jatketaan huomenna. Pidä huolta itsestäsi.",
-            "en": "We have talked a lot today. I am glad you shared with me. Let's continue tomorrow. Take care.",
-            "sv": "Vi har pratat mycket idag. Jag är glad att du delade med mig. Vi fortsätter imorgon. Ta hand om dig.",
+            "en": "We have talked a lot today. I am glad you shared with me. Let us continue tomorrow. Take care.",
+            "sv": "Vi har pratat mycket idag. Jag ar glad att du delade med mig. Vi fortsatter imorgon. Ta hand om dig.",
         }
         closing = closing_messages.get(detected_lang, closing_messages["en"])
 
@@ -250,12 +238,10 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(assistant_msg)
 
-        # Summarize session when hitting the daily limit
         _trigger_session_summary(
             user_id=payload.user_id,
             db=db,
             today_start=today_start,
-            is_closing=True,
         )
 
         return SendMessageResponse(
@@ -265,7 +251,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
             mode="non_stream",
         )
 
-    # 9. Count user messages today for reply style
+    # 9. Count user messages today
     user_messages_today = (
         db.query(ConversationMessage)
         .filter(
@@ -276,7 +262,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         .count()
     )
 
-    # 10. Generate reply (with memory context injected)
+    # 10. Generate AI reply
     ai_reply = _generate_reply(
         message=payload.message,
         language=result["language"],
@@ -285,6 +271,7 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         user_messages_today=user_messages_today,
         db=db,
         user_id=payload.user_id,
+        today_start=today_start,
     )
 
     # 11. Save assistant message
@@ -305,26 +292,59 @@ def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
         mode="non_stream",
     )
 
-# POST /message/stream
 
 @router.post("/message/stream", summary="Send Message Stream")
 def send_message_stream(payload: SendMessageRequest):
     return {"detail": "Streaming not yet implemented"}
 
 
+# ---------------------------------------------------------------------------
 # Internal helpers
+# ---------------------------------------------------------------------------
+
+def _get_todays_topics(
+    user_id: int,
+    db: Session,
+    today_start: datetime,
+) -> list[str]:
+    """
+    Scan today's user messages for topics already discussed.
+    Used to prevent the bot from asking the same question twice.
+    """
+    today_user_msgs = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.user_id == user_id,
+            ConversationMessage.role == "user",
+            ConversationMessage.created_at >= today_start,
+        )
+        .all()
+    )
+
+    combined = " ".join(m.content.lower() for m in today_user_msgs)
+
+    keywords = {
+        "sleep":      ["uni", "nukku", "yö", "sleep", "slept", "sov", "natt"],
+        "food":       ["syö", "ruoka", "lounas", "aamupala", "ate", "eat", "food", "lunch", "mat", "aten"],
+        "hydration":  ["juo", "vesi", "nestey", "drink", "water", "drick", "vatten"],
+        "pain":       ["kipu", "sarky", "sattuu", "pain", "ache", "hurt", "smarta", "ont"],
+        "mood":       ["mieli", "tunne", "vointi", "mood", "feel", "humör", "mar"],
+        "medication": ["laake", "tabletti", "medicine", "pill", "medicin", "tablet"],
+    }
+
+    covered = []
+    for topic, words in keywords.items():
+        if any(w in combined for w in words):
+            covered.append(topic)
+
+    return covered
+
 
 def _trigger_session_summary(
     user_id: int,
     db: Session,
     today_start: datetime,
-    is_closing: bool = False,
 ) -> None:
-    """
-    Fire-and-forget session summarization.
-    Fetches today's messages and calls memory_service.summarize_session().
-    Failures are swallowed — summary is best-effort, never blocks the response.
-    """
     try:
         from app.db.models.user import User
 
@@ -338,11 +358,7 @@ def _trigger_session_summary(
             .all()
         )
 
-        messages = [
-            {"role": m.role, "content": m.content}
-            for m in today_msgs
-        ]
-
+        messages = [{"role": m.role, "content": m.content} for m in today_msgs]
         user = db.query(User).filter(User.id == user_id).first()
         previous_summary = user.memory_summary if user else None
 
@@ -364,112 +380,167 @@ def _generate_reply(
     user_messages_today: int,
     db: Session,
     user_id: int,
+    today_start: datetime,
 ) -> str:
     try:
         from app.integrations.openai_client import client
+        from app.db.models.user import User
 
-        history = (
-            db.query(ConversationMessage)
-            .filter(ConversationMessage.user_id == user_id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(10)
-            .all()
-        )
+        # Get user's first name for personalisation
+        user = db.query(User).filter(User.id == user_id).first()
+        first_name = user.first_name if user and user.first_name else ""
 
-        system_prompts = {
+        # Topics already discussed today — prevents repetition
+        covered_topics = _get_todays_topics(user_id, db, today_start)
+        covered_str = ", ".join(covered_topics) if covered_topics else "none yet"
+
+        # Name instruction — use name occasionally, not every message
+        name_instruction = ""
+        if first_name:
+            name_instruction = (
+                f"\nThe user's name is {first_name}. "
+                "Use their name occasionally to make the conversation personal, but not in every message.\n"
+            )
+
+        base_rules = {
             "fi": (
-                "Olet lämminhenkinen hyvinvointiassistentti iäkkäille ihmisille. "
-                "Tehtäväsi on selvittää, miten henkilö voi: uni, ruoka, juominen, kipu ja mieliala. "
-                "Kysy yksi asia kerrallaan. Älä listaa kysymyksiä. "
-                "Vastaa lyhyesti ja lämpimästi. "
-                "Jos henkilö mainitsee kipua tai huolia, kysy tarkentava kysymys. "
-                "Jos riski on korkea, ilmaise huolesi rauhallisesti ja suosittele yhteydenottoa läheiseen."
+                f"Olet rauhallinen ja lämmin hyvinvointiassistentti iäkkäälle ihmiselle.{name_instruction}"
+                f"Tänään on jo käsitelty: {covered_str}. Älä toista näitä aiheita ellei käyttäjä itse ota niitä uudelleen esiin.\n\n"
+                "Tärkeät säännöt:\n"
+                "- Vastaa lyhyesti, selkeästi ja ystävällisesti.\n"
+                "- Kysy vain YKSI kysymys kerrallaan.\n"
+                "- Älä koskaan listaa monta kysymystä samassa vastauksessa.\n"
+                "- Jos käyttäjä vastaa lyhyesti, jatka lempeästi yhdellä uudella aiheella.\n"
+                "- Älä ylikuormita käyttäjää.\n"
+                "- Älä esitä diagnooseja.\n"
+                "- Jos huomaat huolestuttavan oireen, keskity turvallisuuteen ja yhteen tarkentavaan kysymykseen.\n\n"
+                "Tavoite on ymmärtää vähitellen: uni, ruoka, juominen, kipu, mieliala ja turvallisuus."
             ),
             "en": (
-                "You are a warm welfare assistant for elderly people. "
-                "Your job is to understand how the person is doing: sleep, food, hydration, pain, mood. "
-                "Ask one thing at a time. Never list questions. "
-                "Respond briefly and warmly. "
-                "If they mention pain or worry, ask a follow-up. "
-                "If risk is high, calmly express concern and suggest contacting a trusted person."
+                f"You are a calm, warm wellbeing assistant for an elderly person.{name_instruction}"
+                f"Already discussed today: {covered_str}. Do not repeat these topics unless the user brings them up again.\n\n"
+                "Important rules:\n"
+                "- Reply briefly, clearly and kindly.\n"
+                "- Ask only ONE question at a time.\n"
+                "- Never list multiple questions in one reply.\n"
+                "- If the user gives a short answer, gently continue with one new topic.\n"
+                "- Do not overwhelm the user.\n"
+                "- Do not provide medical diagnosis.\n"
+                "- If there is a concerning symptom, focus on safety and ask one specific follow-up question.\n\n"
+                "The goal is to gradually understand: sleep, food, hydration, pain, mood and safety."
             ),
             "sv": (
-                "Du är en varm välfärdsassistent för äldre. "
-                "Ditt jobb är att förstå hur personen mår: sömn, mat, dryck, smärta, humör. "
-                "Ställ en fråga i taget. Lista aldrig frågor. "
-                "Svara kort och varmt. "
-                "Om de nämner smärta eller oro, ställ en följdfråga. "
-                "Om risken är hög, uttryck lugnt din oro och föreslå kontakt med en närstående."
+                f"Du ar en lugn och varm valfärdsassistent for en aldre person.{name_instruction}"
+                f"Redan diskuterat idag: {covered_str}. Upprepa inte dessa amnen om inte anvandaren tar upp dem igen.\n\n"
+                "Viktiga regler:\n"
+                "- Svara kort, tydligt och vanligt.\n"
+                "- Stall bara EN fraga at gangen.\n"
+                "- Lista aldrig flera fragor i samma svar.\n"
+                "- Om anvandaren svarar kort, fortsatt mjukt med ett nytt amne.\n"
+                "- Overbelasta inte anvandaren.\n"
+                "- Ge inte medicinska diagnoser.\n"
+                "- Om det finns ett oroande symtom, fokusera pa sakerhet och stall en specifik foljdfraga.\n\n"
+                "Malet ar att gradvis forstå: somn, mat, vatska, smarta, humor och sakerhet."
             ),
         }
 
-        # Override for high/critical risk
-        if risk_level in ("high", "critical"):
-            high_risk_prompts = {
-                "fi": (
-                    "Olet hyvinvointiassistentti. Henkilöllä on korkea riskitaso. "
-                    "Vastaa lyhyesti, lämpimästi ja suoraan. "
-                    "Kysy yksi tarkka kysymys: onko hän turvassa juuri nyt ja onko joku lähellä. "
-                    "Suosittele selkeästi ottamaan yhteyttä läheiseen tai hoitajaan tänään. "
-                    "Älä jatka normaalia keskustelua — keskity turvallisuuteen."
-                ),
-                "en": (
-                    "You are a welfare assistant. This person has a high risk level. "
-                    "Respond briefly, warmly and directly. "
-                    "Ask one specific question: are they safe right now and is anyone nearby. "
-                    "Clearly recommend they contact a trusted person or care worker today. "
-                    "Do not continue normal conversation — focus on their safety."
-                ),
-                "sv": (
-                    "Du är en välfärdsassistent. Denna person har hög risknivå. "
-                    "Svara kort, varmt och direkt. "
-                    "Ställ en specifik fråga: är de trygga just nu och finns någon i närheten. "
-                    "Rekommendera tydligt att de kontaktar en närstående eller vårdare idag. "
-                    "Fortsätt inte normalt samtal — fokusera på deras säkerhet."
-                ),
-            }
-            system_prompt = high_risk_prompts.get(language, high_risk_prompts["en"])
-        else:
-            system_prompt = system_prompts.get(language, system_prompts["en"])
+        high_risk_rules = {
+            "fi": (
+                f"Olet hyvinvointiassistentti. Käyttäjän viestissä on korkea tai kriittinen riskitaso.{name_instruction}\n"
+                "Toimi näin:\n"
+                "- Vastaa lyhyesti, lämpimästi ja suoraan.\n"
+                "- Keskity turvallisuuteen, älä jatka normaalia jutustelua.\n"
+                "- Kysy vain yksi kysymys: onko käyttäjä turvassa juuri nyt ja onko joku lähellä.\n"
+                "- Suosittele ottamaan yhteyttä läheiseen, hoitajaan tai hätäpalveluun tilanteen vakavuuden mukaan.\n"
+                "- Älä tee diagnoosia.\n"
+                "- Älä käytä pelottelevaa kieltä."
+            ),
+            "en": (
+                f"You are a wellbeing assistant. The user message has a high or critical risk level.{name_instruction}\n"
+                "Do this:\n"
+                "- Reply briefly, warmly and directly.\n"
+                "- Focus on safety, not normal conversation.\n"
+                "- Ask only one question: are they safe right now and is someone nearby.\n"
+                "- Recommend contacting a trusted person, care worker or emergency services depending on severity.\n"
+                "- Do not diagnose.\n"
+                "- Do not use frightening language."
+            ),
+            "sv": (
+                f"Du ar en valfärdsassistent. Användarens meddelande har hog eller kritisk riskniva.{name_instruction}\n"
+                "Gor sa har:\n"
+                "- Svara kort, varmt och direkt.\n"
+                "- Fokusera pa sakerhet, inte vanligt samtal.\n"
+                "- Stall bara en fraga: ar anvandaren trygg just nu och finns nagon i narheten.\n"
+                "- Rekommendera kontakt med en narstående, vardare eller larmtjanst beroende pa allvarlighetsgrad.\n"
+                "- Ge ingen diagnos.\n"
+                "- Anvand inte skrammande sprak."
+            ),
+        }
 
-        # Inject memory context from previous sessions
+        if risk_level in ("high", "critical"):
+            system_prompt = high_risk_rules.get(language, high_risk_rules["en"])
+        else:
+            system_prompt = base_rules.get(language, base_rules["en"])
+
+        # Inject memory from previous sessions
         memory_context = get_memory_context(user_id=user_id, db=db, language=language)
         if memory_context:
             system_prompt = memory_context + "\n\n" + system_prompt
 
-        # Add follow-up instruction if early in conversation
-        if user_messages_today <= 2 and follow_up and risk_level not in ("high", "critical"):
+        # Follow-up hint only early in conversation and for new topics
+        if (
+            user_messages_today <= 2
+            and follow_up
+            and risk_level not in ("high", "critical")
+        ):
             follow_up_instructions = {
-                "fi": f" Kun olet vastannut, kysy luonnollisesti: {follow_up}",
-                "en": f" After responding, naturally ask: {follow_up}",
-                "sv": f" Efter att ha svarat, fråga naturligt: {follow_up}",
+                "fi": f"\n\nJos tämä aihe ei ole jo tullut esiin tänään, voit kysyä: {follow_up}",
+                "en": f"\n\nIf this topic has not already been covered today, you may ask: {follow_up}",
+                "sv": f"\n\nOm detta amne inte redan tagits upp idag kan du fraga: {follow_up}",
             }
             system_prompt += follow_up_instructions.get(language, follow_up_instructions["en"])
 
-        messages = [{"role": "system", "content": system_prompt}]
-        for msg in reversed(history):
-            messages.append({"role": msg.role, "content": msg.content})
+        # Build message list from today's history in chronological order.
+        # The current message is already saved to DB and included in history —
+        # do NOT append it again to avoid sending it twice to the model.
+        history = (
+            db.query(ConversationMessage)
+            .filter(
+                ConversationMessage.user_id == user_id,
+                ConversationMessage.created_at >= today_start,
+            )
+            .order_by(ConversationMessage.created_at)
+            .limit(20)
+            .all()
+        )
+
+        chat_messages = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            chat_messages.append({"role": msg.role, "content": msg.content})
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=200,
-            temperature=0.6,
+            messages=chat_messages,
+            max_tokens=180,
+            temperature=0.4,
         )
+
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        logger.error(f"OpenAI call failed: {type(e).__name__}: {e}")
+        logger.error("OpenAI call failed: %s: %s", type(e).__name__, e)
+
         if user_messages_today <= 2 and follow_up:
             fallback = {
                 "fi": f"Kiitos vastauksestasi. {follow_up}",
-                "sv": f"Tack för ditt svar. {follow_up}",
+                "sv": f"Tack for ditt svar. {follow_up}",
                 "en": f"Thank you for sharing. {follow_up}",
             }
         else:
             fallback = {
-                "fi": "Kiitos. Pidän sinut mielessäni.",
-                "sv": "Tack. Jag tänker på dig.",
-                "en": "Thank you. I'm keeping you in mind.",
+                "fi": "Kiitos, etta kerroit. Olen tassa kanssasi.",
+                "sv": "Tack for att du berattade. Jag ar har med dig.",
+                "en": "Thank you for sharing. I am here with you.",
             }
+
         return fallback.get(language, fallback["en"])
