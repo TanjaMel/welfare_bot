@@ -210,7 +210,7 @@ export async function getWellbeingInsights(userId: number): Promise<WellbeingIns
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/password-reset/request`, {
+  const response = await fetch(`${API_BASE}/auth/forgot-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
