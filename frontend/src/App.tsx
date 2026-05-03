@@ -152,7 +152,7 @@ export default function App() {
 
       if (role === "admin") {
         const allUsers = await getUsers();
-        setUsers(allUsers);
+        _setUsers(allUsers);
         const storedId = getStoredUserId();
         activeUser = storedId ? allUsers.find((u) => u.id === storedId) ?? allUsers[0] : allUsers[0];
       } else {
