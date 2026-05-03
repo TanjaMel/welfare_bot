@@ -16,22 +16,26 @@ scheduler: Optional[BackgroundScheduler] = None
 
 def start_scheduler() -> BackgroundScheduler:
     global scheduler
-
     if scheduler is not None and scheduler.running:
         return scheduler
-
     scheduler = BackgroundScheduler(timezone="UTC")
-
     scheduler.add_job(
-    send_weekly_report,
-    trigger="cron",
-    day_of_week="mon",
-    hour=8,
-    minute=0,
-    id="weekly_report",
-    replace_existing=True,
+        run_daily_aggregation,
+        trigger="cron",
+        hour=0,
+        minute=5,
+        id="daily_wellbeing_aggregation",
+        replace_existing=True,
     )
-
+    scheduler.add_job(
+        send_weekly_report,
+        trigger="cron",
+        day_of_week="mon",
+        hour=8,
+        minute=0,
+        id="weekly_report",
+        replace_existing=True,
+    )
     scheduler.add_job(
         send_pending_notifications,
         trigger="interval",
@@ -39,10 +43,8 @@ def start_scheduler() -> BackgroundScheduler:
         id="send_pending_notifications",
         replace_existing=True,
     )
-
     scheduler.start()
     return scheduler
-
 
 def shutdown_scheduler() -> None:
     global scheduler
