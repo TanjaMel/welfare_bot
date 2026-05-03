@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel
-
+from pydantic import BaseModel, ConfigDict
 
 class DailyCheckInCreate(BaseModel):
     user_id: int
@@ -26,8 +25,7 @@ class DailyCheckInRead(BaseModel):
     notes: str | None = None
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DailyCheckInUpdate(BaseModel):

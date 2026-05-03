@@ -264,10 +264,10 @@ export default function App() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (isAuthenticated) void bootstrap();
   }, [isAuthenticated]);
-
   // Handle password reset link
   const resetToken = new URLSearchParams(window.location.search).get("token");
   if (window.location.pathname === "/reset-password" && resetToken) {

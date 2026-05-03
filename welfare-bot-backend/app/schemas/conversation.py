@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ConversationMessageRead(BaseModel):
@@ -16,8 +15,7 @@ class ConversationMessageRead(BaseModel):
     risk_score: int | None = None
     risk_category: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SendMessageRequest(BaseModel):

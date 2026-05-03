@@ -9,7 +9,8 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -30,8 +31,7 @@ class WellbeingSummaryResponse(BaseModel):
     data_completeness: float
     checked_at: str  # human-readable time, not ISO
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DailyScorePoint(BaseModel):
@@ -283,4 +283,5 @@ def get_insights(
     else:
         summary = f"We noticed a few things worth a little attention across the last {days} days."
 
-    return InsightsResponse(insights=insights, summary=summary)
+    return InsightsResponse(insights=
+                            insights, summary=summary)

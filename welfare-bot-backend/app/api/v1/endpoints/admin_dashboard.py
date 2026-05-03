@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -39,8 +39,7 @@ class UserRiskRow(BaseModel):
     alert: bool
     alert_reason: str  # Human-readable reason for alert
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PopulationSummary(BaseModel):
