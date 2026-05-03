@@ -73,16 +73,18 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/forgot-password", summary="Create password reset token")
+@router.post("/forgot-password", summary="Request password reset")
 def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    # Always return same message to prevent email enumeration
+    generic_response = {
+        "message": "If an account with this email exists, a password reset link has been sent."
+    }
+
     user = db.query(User).filter(User.email == payload.email).first()
-
     if not user:
-        return {
-            "message": "If an account with this email exists, password reset instructions have been created.",
-            "reset_token": None,
-        }
+        return generic_response
 
+    # Generate secure token
     token = secrets.token_urlsafe(32)
 
     reset_token = PasswordResetToken(
@@ -91,17 +93,31 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
         expires_at=PasswordResetToken.default_expiry(),
         used=False,
     )
-
     db.add(reset_token)
     db.commit()
 
-    return {
-        "message": "Password reset token created.",
-        "reset_token": token,
-    }
+    # Send email via SendGrid
+    try:
+        from app.services.notification_service import send_password_reset_email
+        user_name = user.first_name or ""
+        sent = send_password_reset_email(
+            to_email=user.email,
+            reset_token=token,
+            user_name=user_name,
+        )
+        if not sent:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Password reset email could not be sent to %s", user.email
+            )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Password reset email error: %s", e)
+
+    return generic_response
 
 
-@router.post("/reset-password", summary="Reset password")
+@router.post("/reset-password", summary="Reset password using token")
 def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     if len(payload.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
@@ -122,13 +138,11 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail="Reset token has expired.")
 
     user = db.query(User).filter(User.id == reset_token.user_id).first()
-
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
     user.password_hash = hash_password(payload.new_password)
     reset_token.used = True
-
     db.commit()
 
     return {"message": "Password has been reset successfully."}

@@ -75,7 +75,7 @@ export default function App() {
   const [_users, setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("Loading...");
-  const [_userLanguage, setUserLanguage] = useState<string>("fi");
+  const [_userLanguage, _setUserLanguage] = useState<string>("fi");
   const [currentUserRole, setCurrentUserRole] = useState<string>("user");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [riskAnalyses, setRiskAnalyses] = useState<RiskAnalysis[]>([]);
@@ -93,7 +93,7 @@ export default function App() {
   function applyUserMeta(user: User) {
     setUserId(user.id);
     setUserName([user.first_name, user.last_name].filter(Boolean).join(" "));
-    setUserLanguage(user.language || "fi");
+    _setUserLanguage(user.language || "fi");
     storeUserId(user.id);
   }
 
