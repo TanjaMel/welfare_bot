@@ -72,7 +72,7 @@ function storeUserId(id: number) {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!localStorage.getItem("access_token"));
-  const [users, setUsers] = useState<User[]>([]);
+  const [_users, setUsers] = useState<User[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState<string>("Loading...");
   const [_userLanguage, setUserLanguage] = useState<string>("fi");
