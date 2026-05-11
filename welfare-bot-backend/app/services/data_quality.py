@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Metrics to check (column names in WellbeingDailyMetrics)
+# All metric columns in WellbeingDailyMetrics that we check for quality.
+# These are the scores computed by the aggregation pipeline each night.
 METRIC_COLUMNS = [
     "overall_wellbeing_score",
     "mood_score",
@@ -42,27 +43,30 @@ METRIC_COLUMNS = [
     "risk_score",
 ]
 
-# Expected value range for all scores
+# All scores in this system are on a 0–100 scale.
+# Any value outside this range is considered an outlier and flagged for repair.
 SCORE_MIN = 0.0
 SCORE_MAX = 100.0
 
-# A gap longer than this many days is flagged as concerning
+# If a user has no data for more than this many consecutive days, it is flagged.
+# 2 days is the threshold — a single missed day is acceptable, two or more is not.
 GAP_THRESHOLD_DAYS = 2
 
-# Minimum completeness ratio before a user is flagged
+# If less than 30% of expected data days are present, the user needs attention.
 MIN_COMPLETENESS = 0.3
 
 
 # ---------------------------------------------------------------------------
-# Data structures
+# Data structures — these define the shape of quality report results
 # ---------------------------------------------------------------------------
 
 @dataclass
 class MetricQuality:
+    """Quality report for a single metric (e.g. sleep_score) across all rows."""
     metric: str
     total_rows: int
     missing_count: int
-    missing_rate: float        # 0.0–1.0
+    missing_rate: float        # 0.0 = no missing, 1.0 = all missing
     outlier_count: int
     outlier_rate: float
     min_value: Optional[float]
@@ -73,21 +77,23 @@ class MetricQuality:
 
 @dataclass
 class GapReport:
+    """A period where no data was recorded for a user."""
     start_date: str
     end_date: str
     gap_days: int
-    is_concerning: bool
+    is_concerning: bool        # True if gap_days >= GAP_THRESHOLD_DAYS
 
 
 @dataclass
 class UserDataQuality:
+    """Full quality report for a single user over a time window."""
     user_id: int
     assessment_date: str
     total_days_expected: int
     total_days_present: int
-    coverage_rate: float           # days present / days expected
+    coverage_rate: float           # days present / days expected (0.0–1.0)
     overall_completeness: float    # weighted average of metric completeness
-    overall_quality_score: float   # 0–100
+    overall_quality_score: float   # 0–100 composite score
     metric_quality: list[MetricQuality] = field(default_factory=list)
     gaps: list[GapReport] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
@@ -97,13 +103,14 @@ class UserDataQuality:
 
 @dataclass
 class PopulationDataQuality:
+    """Population-level quality summary across all users."""
     assessment_date: str
     total_users: int
     users_with_data: int
     users_needing_attention: int
     avg_quality_score: float
     avg_coverage_rate: float
-    most_missing_metric: str
+    most_missing_metric: str       # which metric is missing most often
     longest_gap_days: int
     user_reports: list[dict] = field(default_factory=list)
 
@@ -116,20 +123,36 @@ def _check_metric_quality(
     rows: list,
     metric: str,
 ) -> MetricQuality:
-    """Analyse data quality for a single metric across all rows."""
+    """
+    Analyses data quality for a single metric across all rows.
+
+    Quality score formula:
+        completeness (70%) + accuracy (30%)
+        - completeness = fraction of rows that have a value (not None)
+        - accuracy = fraction of present values that are within 0–100 range
+
+    A metric with all values present and in range scores ~100.
+    A metric with all values missing scores 0.
+    """
     total = len(rows)
     if total == 0:
+        # No rows at all — return empty result with zero quality
         return MetricQuality(
             metric=metric, total_rows=0, missing_count=0, missing_rate=0.0,
             outlier_count=0, outlier_rate=0.0, min_value=None, max_value=None,
             mean_value=None, quality_score=0.0,
         )
 
+    # Extract all values for this metric from the rows
     values = [getattr(row, metric) for row in rows]
+
+    # Separate present (non-None) from missing values
     present = [v for v in values if v is not None]
     missing_count = total - len(present)
     missing_rate = missing_count / total
 
+    # Count outliers — values outside the expected 0–100 range
+    # Small tolerance (0.01) to avoid floating point false positives
     outlier_count = 0
     if present:
         outlier_count = sum(
@@ -144,8 +167,8 @@ def _check_metric_quality(
         outlier_rate = 0.0
         min_val = max_val = mean_val = None
 
-    # Quality score: penalise for missing and outliers
-    # If all values missing, accuracy score is also 0 (no data = no accuracy)
+    # Calculate composite quality score
+    # If all values missing, accuracy contribution is also 0 (no data = no accuracy)
     completeness_score = (1 - missing_rate) * 70
     accuracy_score = (1 - outlier_rate) * 30 if present else 0.0
     quality_score = round(completeness_score + accuracy_score, 1)
@@ -169,8 +192,20 @@ def _detect_gaps(
     start_date: date,
     end_date: date,
 ) -> list[GapReport]:
-    """Find consecutive days where no data was recorded."""
+    """
+    Finds consecutive days where no data was recorded for a user.
+
+    Iterates through every day in the date range and checks if a row exists.
+    A gap starts when a day is missing and ends when data resumes.
+
+    Special case: if there are no rows at all, the entire date range
+    is returned as one large gap.
+
+    This is important because a user who stops using the app
+    will have a growing gap — their silent absence should be flagged.
+    """
     if not rows:
+        # No data at all — the entire period is one gap
         total_days = (end_date - start_date).days + 1
         return [GapReport(
             start_date=str(start_date),
@@ -179,6 +214,7 @@ def _detect_gaps(
             is_concerning=True,
         )]
 
+    # Build a set of dates that have data for fast lookup
     present_dates = {row.date for row in rows}
     gaps = []
     gap_start = None
@@ -186,9 +222,11 @@ def _detect_gaps(
     current = start_date
     while current <= end_date:
         if current not in present_dates:
+            # This day is missing — start tracking a gap if not already
             if gap_start is None:
                 gap_start = current
         else:
+            # Data exists for this day — close any open gap
             if gap_start is not None:
                 gap_days = (current - gap_start).days
                 gaps.append(GapReport(
@@ -200,7 +238,7 @@ def _detect_gaps(
                 gap_start = None
         current += timedelta(days=1)
 
-    # Handle trailing gap
+    # Handle trailing gap — if the last days in the range are missing
     if gap_start is not None:
         gap_days = (end_date - gap_start).days + 1
         gaps.append(GapReport(
@@ -218,16 +256,22 @@ def _generate_issues_and_suggestions(
     gaps: list[GapReport],
     coverage_rate: float,
 ) -> tuple[list[str], list[str]]:
-    """Generate human-readable issues and actionable suggestions."""
+    """
+    Generates human-readable issues and actionable suggestions
+    based on the quality check results.
+
+    Issues are factual descriptions of what is wrong.
+    Suggestions are concrete next steps for the care team or developers.
+    """
     issues = []
     suggestions = []
 
-    # Coverage issues
+    # Coverage issues — less than 50% of days have data
     if coverage_rate < 0.5:
         issues.append(f"Low data coverage: only {coverage_rate*100:.0f}% of days have records")
         suggestions.append("Encourage daily check-ins — more data improves anomaly detection accuracy")
 
-    # Gap issues
+    # Gap issues — find the longest concerning gap and report it
     concerning_gaps = [g for g in gaps if g.is_concerning]
     if concerning_gaps:
         longest = max(concerning_gaps, key=lambda g: g.gap_days)
@@ -239,7 +283,7 @@ def _generate_issues_and_suggestions(
             "Investigate data gaps — the user may have been unreachable or the app unused"
         )
 
-    # Missing value issues
+    # Missing value issues — metrics missing in more than 50% of records
     for mq in metric_quality:
         if mq.missing_rate > 0.5:
             metric_name = mq.metric.replace("_score", "").replace("_", " ")
@@ -250,7 +294,7 @@ def _generate_issues_and_suggestions(
                 f"Add {metric_name} questions to daily check-in to improve data coverage"
             )
 
-    # Outlier issues
+    # Outlier issues — values outside the 0–100 expected range
     outlier_metrics = [mq for mq in metric_quality if mq.outlier_count > 0]
     if outlier_metrics:
         for mq in outlier_metrics:
@@ -277,16 +321,21 @@ def check_user_data_quality(
     lookback_days: int = 30,
 ) -> UserDataQuality:
     """
-    Run data quality checks for a single user.
+    Runs all data quality checks for a single user over the last N days.
 
-    Args:
-        user_id: User to check.
-        db: SQLAlchemy session.
-        assessment_date: Reference date (defaults to today).
-        lookback_days: How many days to analyse.
+    Steps:
+    1. Fetch wellbeing rows from the database for the date window
+    2. Check each metric for missing values and outliers
+    3. Detect gaps in the date sequence
+    4. Calculate overall quality score and coverage rate
+    5. Generate human-readable issues and suggestions
+    6. Determine if the user needs attention
 
-    Returns:
-        UserDataQuality with full quality report.
+    A user needs_attention if:
+    - Overall quality score < 40
+    - Coverage rate < 30% (less than 1 in 3 days have data)
+    - Any gap longer than 5 days
+    - Any outlier values detected
     """
     from app.db.models.wellbeing_daily_metrics import WellbeingDailyMetrics
 
@@ -295,6 +344,7 @@ def check_user_data_quality(
 
     start_date = assessment_date - timedelta(days=lookback_days - 1)
 
+    # Fetch all wellbeing rows for this user in the date window
     rows = (
         db.query(WellbeingDailyMetrics)
         .filter(
@@ -308,37 +358,40 @@ def check_user_data_quality(
 
     total_days_expected = lookback_days
     total_days_present = len(rows)
+    # Coverage rate: what fraction of expected days actually have data
     coverage_rate = total_days_present / total_days_expected if total_days_expected > 0 else 0.0
 
-    # Check each metric
+    # Run quality check for each metric column
     metric_quality = [
         _check_metric_quality(rows, metric)
         for metric in METRIC_COLUMNS
     ]
 
-    # Detect gaps
+    # Detect gaps in the date sequence
     gaps = _detect_gaps(rows, start_date, assessment_date)
 
-    # Overall completeness — average of non-zero metric quality scores
+    # Overall completeness — average quality across all metrics
+    # Medication is excluded because it is often legitimately absent
     core_metrics = [
         mq for mq in metric_quality
-        if mq.metric != "medication_score"  # medication often legitimately absent
+        if mq.metric != "medication_score"
     ]
     avg_completeness = (
         sum(mq.quality_score for mq in core_metrics) / len(core_metrics)
         if core_metrics else 0.0
     )
 
-    # Overall quality score — blend coverage and metric completeness
+    # Overall quality score blends coverage (40%) and metric completeness (60%)
     overall_quality = round(
         coverage_rate * 40 + avg_completeness * 0.6, 1
     )
 
-    # Generate issues and suggestions
+    # Generate human-readable issues and suggestions
     issues, suggestions = _generate_issues_and_suggestions(
         metric_quality, gaps, coverage_rate
     )
 
+    # Determine if this user needs care worker attention
     needs_attention = (
         overall_quality < 40
         or coverage_rate < 0.3
@@ -372,18 +425,17 @@ def repair_outliers(
     dry_run: bool = True,
 ) -> dict:
     """
-    Detect and optionally repair outlier values in wellbeing metrics.
+    Detects and optionally repairs outlier values in wellbeing metrics.
 
-    In dry_run mode (default): only reports what would be fixed.
-    In repair mode: clamps outliers to valid range and saves to DB.
+    Two modes:
+    - dry_run=True (default): reports what would be fixed without changing anything
+    - dry_run=False: clamps outlier values to the valid 0–100 range and saves to DB
 
-    Args:
-        rows: WellbeingDailyMetrics rows to check.
-        db: SQLAlchemy session.
-        dry_run: If True, report only. If False, apply repairs.
+    Clamping means: values below 0 become 0, values above 100 become 100.
+    This is safer than deleting the values because it preserves the data
+    while making it valid for ML model input.
 
-    Returns:
-        Summary of repairs made or recommended.
+    Returns a summary dict with how many rows and values were affected.
     """
     repairs = []
 
@@ -392,8 +444,9 @@ def repair_outliers(
         for metric in METRIC_COLUMNS:
             value = getattr(row, metric)
             if value is None:
-                continue
+                continue  # None is handled separately as missing data
             if value < SCORE_MIN or value > SCORE_MAX:
+                # Clamp to valid range
                 clamped = max(SCORE_MIN, min(SCORE_MAX, value))
                 row_repairs.append({
                     "metric": metric,
@@ -401,6 +454,7 @@ def repair_outliers(
                     "repaired": clamped,
                 })
                 if not dry_run:
+                    # Apply the repair directly to the ORM object
                     setattr(row, metric, clamped)
 
         if row_repairs:
@@ -410,9 +464,10 @@ def repair_outliers(
                 "repairs": row_repairs,
             })
 
+    # Only commit to database if not in dry run mode
     if not dry_run and repairs:
         db.commit()
-        logger.info("Repaired %d outlier values across %d rows", 
+        logger.info("Repaired %d outlier values across %d rows",
                    sum(len(r["repairs"]) for r in repairs), len(repairs))
 
     return {
@@ -433,9 +488,16 @@ def run_population_quality_check(
     lookback_days: int = 30,
 ) -> PopulationDataQuality:
     """
-    Run data quality checks for all active users.
+    Runs data quality checks for all active users and returns a
+    population-level summary.
 
-    Returns a population-level quality summary.
+    Used by:
+    - /admin/data-quality endpoint — shows data health in admin dashboard
+    - /admin/report endpoint — includes data quality section in weekly report
+    - Scheduler — can be run automatically to detect system-wide issues
+
+    The user_reports list is sorted by quality score ascending
+    so the worst-quality users appear first.
     """
     from app.db.models.user import User
 
@@ -447,6 +509,7 @@ def run_population_quality_check(
     user_reports = []
     quality_scores = []
     coverage_rates = []
+    # Track how many users are missing each metric — to find the most problematic one
     missing_metric_counts: dict[str, int] = {m: 0 for m in METRIC_COLUMNS}
     max_gap_days = 0
     users_with_data = 0
@@ -470,14 +533,14 @@ def run_population_quality_check(
             quality_scores.append(report.overall_quality_score)
             coverage_rates.append(report.coverage_rate)
 
-            # Track most missing metric
+            # Count which metrics are most commonly missing across the population
             for mq in report.metric_quality:
                 if mq.missing_rate > 0.5:
                     missing_metric_counts[mq.metric] = (
                         missing_metric_counts.get(mq.metric, 0) + 1
                     )
 
-            # Track longest gap
+            # Track the longest gap seen across all users
             for gap in report.gaps:
                 if gap.gap_days > max_gap_days:
                     max_gap_days = gap.gap_days
@@ -495,10 +558,11 @@ def run_population_quality_check(
         except Exception as e:
             logger.error("Quality check failed for user %d: %s", user.id, e)
 
+    # Find which metric is missing most often across the population
     most_missing = max(missing_metric_counts, key=missing_metric_counts.get) \
         if missing_metric_counts else "unknown"
 
-    # Sort by quality score ascending (worst first)
+    # Sort by quality score ascending — worst quality users first
     user_reports.sort(key=lambda r: r["quality_score"])
 
     return PopulationDataQuality(
